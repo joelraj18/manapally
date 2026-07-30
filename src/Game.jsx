@@ -1,9 +1,12 @@
-import React, { useState } from 'react';
+import React, { useCallback, useState } from 'react';
+import AmbientMusic from './components/AmbientMusic';
 import BackgroundEffects from './components/BackgroundEffects';
 import FeatureCard from './components/FeatureCard';
 import Footer from './components/Footer';
 import Hero from './components/Hero';
+import Lobby from './pages/Lobby/Lobby';
 import Navbar from './components/Navbar';
+import BoardGame from './pages/Game/BoardGame';
 
 import './styles/game.css';
 import './styles/hero.css';
@@ -35,15 +38,16 @@ const features = [
 
 export default function Game() {
   const [isMusicEnabled, setIsMusicEnabled] = useState(false);
+  const [currentView, setCurrentView] = useState('home');
   const [notice, setNotice] = useState('');
 
-  const showNotice = (message) => {
+  const showNotice = useCallback((message) => {
     setNotice(message);
 
     window.setTimeout(() => {
       setNotice('');
     }, 2800);
-  };
+  }, []);
 
   const scrollToSection = (sectionId) => {
     document.getElementById(sectionId)?.scrollIntoView({
@@ -51,22 +55,61 @@ export default function Game() {
     });
   };
 
+  const handleMusicToggle = () => {
+    setIsMusicEnabled((isEnabled) => !isEnabled);
+  };
+
+  const handlePlaybackBlocked = useCallback(() => {
+    setIsMusicEnabled(false);
+    showNotice('Music could not start. Please try the Sound button again.');
+  }, [showNotice]);
+
+  if (currentView === 'board') {
+    return (
+      <BoardGame
+        onExit={() => {
+          setCurrentView('home');
+        }}
+      />
+    );
+  }
+
+  if (currentView === 'lobby') {
+    return (
+        <Lobby
+        onBack={() => {
+          setCurrentView('home');
+        }}
+        onStartGame={() => {
+          setCurrentView('board');
+        }}
+      />
+    );
+  }
+
+
+
   return (
     <main className="game-shell">
+      <AmbientMusic
+        isPlaying={isMusicEnabled}
+        onPlaybackBlocked={handlePlaybackBlocked}
+      />
+
       <BackgroundEffects />
 
       <Navbar
         musicEnabled={isMusicEnabled}
-        onMusicToggle={() => setIsMusicEnabled((value) => !value)}
+        onMusicToggle={handleMusicToggle}
         onNavigate={scrollToSection}
       />
 
       <Hero
-        onCreateRoom={() =>
-          showNotice('Private rooms arrive in the next sprint.')
-        }
+        onCreateRoom={() => {
+            setCurrentView('lobby');
+        }}
         onExplore={() => scrollToSection('experience')}
-      />
+        />
 
       <section
         className="experience section-wrap"
