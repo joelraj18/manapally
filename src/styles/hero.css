@@ -1,0 +1,14 @@
+.hero-art::after {
+    position: absolute;
+    bottom: 40px;
+    width: 290px;
+    height: 150px;
+    background: radial-gradient(
+      ellipse,
+      rgba(0, 0, 0, 0.42),
+      transparent 68%
+    );
+    border-radius: 50%;
+    content: "";
+    filter: blur(10px);
+  }
