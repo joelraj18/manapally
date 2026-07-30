@@ -1,4 +1,4 @@
-import React, { useState, useEffect, useRef } from 'react';
+import React, { useState } from 'react';
 import BackgroundEffects from './components/BackgroundEffects';
 import FeatureCard from './components/FeatureCard';
 import Footer from './components/Footer';
