@@ -1,0 +1,15 @@
+{
+  "files": {
+    "main.css": "/manapally/static/css/main.a101e69e.css",
+    "main.js": "/manapally/static/js/main.012e972d.js",
+    "static/js/453.0274e639.chunk.js": "/manapally/static/js/453.0274e639.chunk.js",
+    "index.html": "/manapally/index.html",
+    "main.a101e69e.css.map": "/manapally/static/css/main.a101e69e.css.map",
+    "main.012e972d.js.map": "/manapally/static/js/main.012e972d.js.map",
+    "453.0274e639.chunk.js.map": "/manapally/static/js/453.0274e639.chunk.js.map"
+  },
+  "entrypoints": [
+    "static/css/main.a101e69e.css",
+    "static/js/main.012e972d.js"
+  ]
+}
