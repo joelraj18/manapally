@@ -1,34 +1,14 @@
 import { useMemo, useState } from 'react';
 import GoldButton from '../../components/GoldButton';
+import { PIECES, PIECE_ORDER, PieceMark } from '../Game/pieces.jsx';
 import './lobby.css';
 import RoomWaiting from './RoomWaiting';
 
-const playerOptions = [
-  {
-    id: 'elephant',
-    name: 'Royal Elephant',
-    icon: '♞',
-    color: '#0f785d',
-  },
-  {
-    id: 'veena',
-    name: 'Veena',
-    icon: '♬',
-    color: '#8d2434',
-  },
-  {
-    id: 'coffee',
-    name: 'Coffee Tumbler',
-    icon: '◒',
-    color: '#a66b2e',
-  },
-  {
-    id: 'bell',
-    name: 'Temple Bell',
-    icon: '♢',
-    color: '#1e578c',
-  },
-];
+const playerOptions = PIECE_ORDER.map((key) => ({
+  id: key,
+  name: PIECES[key].label,
+  color: PIECES[key].colour,
+}));
 
 const ROOM_CODE_CHARACTERS = 'ABCDEFGHJKLMNPQRSTUVWXYZ123456789';
 
@@ -41,16 +21,16 @@ const createRoomCode = () =>
       ],
   ).join('');
 
-  export default function Lobby({ onBack, onStartGame }) {
+export default function Lobby({ onBack, onStartGame }) {
   const [displayName, setDisplayName] = useState('');
   const [roomCode, setRoomCode] = useState('');
   const [createdRoomCode, setCreatedRoomCode] = useState('');
   const [isWaitingRoom, setIsWaitingRoom] = useState(false);
-  const [selectedToken, setSelectedToken] = useState(playerOptions[0].id);
+  const [selectedToken, setSelectedToken] = useState('lamp');
   const [message, setMessage] = useState('');
 
   const selectedPlayer = useMemo(
-    () => playerOptions.find((player) => player.id === selectedToken),
+    () => playerOptions.find((player) => player.id === selectedToken) || playerOptions[0],
     [selectedToken],
   );
 
@@ -189,12 +169,12 @@ const createRoomCode = () =>
                     ? 'token-choice--selected'
                     : ''
                 }`}
-                style={{ '--token-color': player.color }}
+                style={{ '--token-color': player.color, color: player.color }}
                 onClick={() => setSelectedToken(player.id)}
                 aria-pressed={selectedToken === player.id}
                 aria-label={`Choose ${player.name}`}
               >
-                <span>{player.icon}</span>
+                <PieceMark piece={player.id} variant="token" />
               </button>
             ))}
           </div>

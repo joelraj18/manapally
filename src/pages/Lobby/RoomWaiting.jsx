@@ -1,14 +1,7 @@
+import React, { useState } from 'react';
 import GoldButton from '../../components/GoldButton';
+import { PIECES, PieceMark } from '../Game/pieces.jsx';
 import './room-waiting.css';
-
-const tokenIcons = {
-  elephant: '♞',
-  veena: '♬',
-  coffee: '◒',
-  bell: '♢',
-};
-
-const openSeats = [1, 2, 3];
 
 export default function RoomWaiting({
   roomCode,
@@ -17,11 +10,26 @@ export default function RoomWaiting({
   onBack,
   onStartGame,
 }) {
+  const [playerCount, setPlayerCount] = useState(2);
+
   const copyRoomCode = async () => {
     try {
       await navigator.clipboard.writeText(roomCode);
     } catch {
       // The room code remains visible if the browser blocks clipboard access.
+    }
+  };
+
+  const openSeats = Array.from({ length: playerCount - 1 }, (_, i) => i + 1);
+  const hostPieceConfig = PIECES[hostToken] || PIECES.lamp;
+
+  const handleStart = () => {
+    if (onStartGame) {
+      onStartGame({
+        playerCount,
+        hostPiece: hostToken,
+        hostName: hostName || 'Host',
+      });
     }
   };
 
@@ -74,37 +82,59 @@ export default function RoomWaiting({
             <div>
               <p className="eyebrow">Players at the table</p>
               <h2>
-                1 <span>/ 4 seated</span>
+                1 <span>/ {playerCount} seated</span>
               </h2>
             </div>
 
             <span className="host-badge">You are the host</span>
           </div>
 
+          <div className="seat-count-section">
+            <span className="field-label">Table size</span>
+            <div className="seat-count-picker">
+              {[2, 3, 4].map((count) => (
+                <button
+                  key={count}
+                  type="button"
+                  className={`seat-count-btn ${
+                    playerCount === count ? 'seat-count-btn--selected' : ''
+                  }`}
+                  onClick={() => setPlayerCount(count)}
+                  aria-pressed={playerCount === count}
+                >
+                  {count} Players
+                </button>
+              ))}
+            </div>
+          </div>
+
           <div className="player-seat-list">
             <article className="player-seat player-seat--host">
-              <div className="player-token">
-                {tokenIcons[hostToken] || '♞'}
+              <div
+                className="player-token"
+                style={{ color: hostPieceConfig.colour }}
+              >
+                <PieceMark piece={hostToken} variant="token" />
               </div>
 
               <div className="player-details">
                 <strong>{hostName || 'Host'}</strong>
-                <span>Host · ready at the table</span>
+                <span>Host ({hostPieceConfig.label}) · ready at the table</span>
               </div>
 
               <span className="ready-mark">✓</span>
             </article>
 
-            {openSeats.map((seatNumber) => (
-              <article className="player-seat player-seat--open" key={seatNumber}>
+            {openSeats.map((seatIndex) => (
+              <article className="player-seat player-seat--open" key={seatIndex}>
                 <div className="empty-token">+</div>
 
                 <div className="player-details">
-                  <strong>Seat available</strong>
-                  <span>Awaiting a player</span>
+                  <strong>AI Opponent {seatIndex}</strong>
+                  <span>Auto-joins match start</span>
                 </div>
 
-                <span className="seat-number">0{seatNumber + 1}</span>
+                <span className="seat-number">0{seatIndex + 1}</span>
               </article>
             ))}
           </div>
@@ -113,12 +143,12 @@ export default function RoomWaiting({
             <div>
               <p className="eyebrow">Host controls</p>
               <span>
-                You can start now for a test game, or wait for friends
+                You can start now with {playerCount - 1} AI opponent{playerCount > 2 ? 's' : ''}, or wait for friends
                 to join using the invitation code.
               </span>
             </div>
 
-            <GoldButton icon="✦" onClick={onStartGame}>
+            <GoldButton icon="✦" onClick={handleStart}>
               Start game
             </GoldButton>
           </div>

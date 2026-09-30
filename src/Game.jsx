@@ -39,6 +39,7 @@ const features = [
 export default function Game() {
   const [isMusicEnabled, setIsMusicEnabled] = useState(false);
   const [currentView, setCurrentView] = useState('home');
+  const [matchConfig, setMatchConfig] = useState({ playerCount: 2, hostPiece: 'lamp', hostName: 'Host' });
   const [notice, setNotice] = useState('');
 
   const showNotice = useCallback((message) => {
@@ -67,6 +68,11 @@ export default function Game() {
   if (currentView === 'board') {
     return (
       <BoardGame
+        playerCount={matchConfig.playerCount}
+        hostPiece={matchConfig.hostPiece}
+        hostName={matchConfig.hostName}
+        isMusicEnabled={isMusicEnabled}
+        onMusicToggle={handleMusicToggle}
         onExit={() => {
           setCurrentView('home');
         }}
@@ -76,11 +82,14 @@ export default function Game() {
 
   if (currentView === 'lobby') {
     return (
-        <Lobby
+      <Lobby
         onBack={() => {
           setCurrentView('home');
         }}
-        onStartGame={() => {
+        onStartGame={(config) => {
+          if (config) {
+            setMatchConfig(config);
+          }
           setCurrentView('board');
         }}
       />
