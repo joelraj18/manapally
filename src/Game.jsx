@@ -1,46 +1,40 @@
-import React, { useCallback, useState } from 'react';
+import React, { useCallback, useEffect, useRef, useState } from 'react';
 import AmbientMusic from './components/AmbientMusic';
 import BackgroundEffects from './components/BackgroundEffects';
-import FeatureCard from './components/FeatureCard';
 import Footer from './components/Footer';
+import GoldButton from './components/GoldButton';
 import Hero from './components/Hero';
-import Lobby from './pages/Lobby/Lobby';
 import Navbar from './components/Navbar';
+import useReveal from './hooks/useReveal';
 import BoardGame from './pages/Game/BoardGame';
+import BoardGuide from './pages/Home/BoardGuide';
+import DistrictFamilies from './pages/Home/DistrictFamilies';
+import FairPlay from './pages/Home/FairPlay';
+import Faq from './pages/Home/Faq';
+import Highlights from './pages/Home/Highlights';
+import HowToPlay from './pages/Home/HowToPlay';
+import PieceShelf from './pages/Home/PieceShelf';
+import Tips from './pages/Home/Tips';
+import Lobby from './pages/Lobby/Lobby';
 
 import './styles/game.css';
 import './styles/hero.css';
 import './styles/navbar.css';
 
-const features = [
-  {
-    number: 'I',
-    title: 'Build a legacy',
-    description:
-      'Acquire exquisite districts, complete collections, and shape a kingdom worthy of the crown.',
-    symbol: '✦',
-  },
-  {
-    number: 'II',
-    title: 'Outthink the court',
-    description:
-      'Trade intelligently, navigate shifting fortunes, and turn every decision into prestige.',
-    symbol: '♜',
-  },
-  {
-    number: 'III',
-    title: 'Gather your circle',
-    description:
-      'Invite friends to a private table and enjoy a refined strategy night from anywhere.',
-    symbol: '◌',
-  },
-];
-
 export default function Game() {
   const [isMusicEnabled, setIsMusicEnabled] = useState(false);
   const [currentView, setCurrentView] = useState('home');
+  const [lobbyPiece, setLobbyPiece] = useState('lamp');
   const [matchConfig, setMatchConfig] = useState({ playerCount: 2, hostPiece: 'lamp', hostName: 'Host' });
   const [notice, setNotice] = useState('');
+  const homeRef = useRef(null);
+
+  useReveal(homeRef, currentView);
+
+  // Each view starts at the top, the way a new page would.
+  useEffect(() => {
+    window.scrollTo({ top: 0, behavior: 'auto' });
+  }, [currentView]);
 
   const showNotice = useCallback((message) => {
     setNotice(message);
@@ -51,9 +45,19 @@ export default function Game() {
   }, []);
 
   const scrollToSection = (sectionId) => {
+    if (sectionId === 'top') {
+      window.scrollTo({ top: 0, behavior: 'smooth' });
+      return;
+    }
+
     document.getElementById(sectionId)?.scrollIntoView({
       behavior: 'smooth',
     });
+  };
+
+  const openLobby = (piece = 'lamp') => {
+    setLobbyPiece(typeof piece === 'string' ? piece : 'lamp');
+    setCurrentView('lobby');
   };
 
   const handleMusicToggle = () => {
@@ -62,7 +66,7 @@ export default function Game() {
 
   const handlePlaybackBlocked = useCallback(() => {
     setIsMusicEnabled(false);
-    showNotice('Music could not start. Please try the Sound button again.');
+    showNotice('Music could not start, please tap the speaker button again');
   }, [showNotice]);
 
   if (currentView === 'board') {
@@ -83,6 +87,7 @@ export default function Game() {
   if (currentView === 'lobby') {
     return (
       <Lobby
+        initialPiece={lobbyPiece}
         onBack={() => {
           setCurrentView('home');
         }}
@@ -96,88 +101,52 @@ export default function Game() {
     );
   }
 
-
-
   return (
-    <main className="game-shell">
-      <AmbientMusic
-        isPlaying={isMusicEnabled}
-        onPlaybackBlocked={handlePlaybackBlocked}
-      />
-
-      <BackgroundEffects />
+    <main className="game-shell" ref={homeRef}>
+      <AmbientMusic isPlaying={isMusicEnabled} onPlaybackBlocked={handlePlaybackBlocked} />
 
       <Navbar
         musicEnabled={isMusicEnabled}
         onMusicToggle={handleMusicToggle}
         onNavigate={scrollToSection}
+        onPlay={() => openLobby()}
       />
 
-      <Hero
-        onCreateRoom={() => {
-            setCurrentView('lobby');
-        }}
-        onExplore={() => scrollToSection('experience')}
-        />
+      <div className="hero-wrap">
+        <BackgroundEffects />
+        <Hero onCreateRoom={() => openLobby()} onExplore={() => scrollToSection('how-to-play')} />
+      </div>
 
-      <section
-        className="experience section-wrap"
-        id="experience"
-        aria-labelledby="experience-heading"
-      >
-        <div className="section-heading reveal">
-          <p className="eyebrow">A table set for strategy</p>
+      <Highlights />
+      <PieceShelf onPlay={openLobby} />
+      <HowToPlay onPlay={() => openLobby()} />
+      <BoardGuide />
+      <DistrictFamilies />
+      <FairPlay />
+      <Tips />
+      <Faq />
 
-          <h2 id="experience-heading">
-            Made for memorable game nights.
-          </h2>
-
-          <p>
-            Every piece of Manapally is designed to feel considered:
-            rich materials, tactile motion, and rules that reward a
-            thoughtful move.
-          </p>
-        </div>
-
-        <div className="feature-grid">
-          {features.map((feature) => (
-            <FeatureCard key={feature.number} {...feature} />
-          ))}
-        </div>
-      </section>
-
-      <section
-        className="coming-soon section-wrap"
-        id="how-to-play"
-        aria-labelledby="how-heading"
-      >
-        <div className="royal-seal" aria-hidden="true">
-          M
-        </div>
-
-        <div>
-          <p className="eyebrow">The first season</p>
-
-          <h2 id="how-heading">The court is assembling.</h2>
-
-          <p>
-            Manapally is in development. Follow its progress and be
-            first to receive a seat at the table.
-          </p>
+      <section className="closing-cta" aria-labelledby="closing-heading">
+        <div className="section-inner section-head--center reveal">
+          <h2 id="closing-heading">Your table is ready</h2>
+          <p className="section-lede">Pick a piece, open a private room and make the first move</p>
+          <div className="closing-actions">
+            <GoldButton onClick={() => openLobby()}>Create a room</GoldButton>
+            <button type="button" className="text-link text-link--large" onClick={() => scrollToSection('how-to-play')}>
+              Read the rules <span aria-hidden="true">›</span>
+            </button>
+          </div>
         </div>
       </section>
 
       <Footer
-        onJoin={() =>
-          showNotice('Thank you — early access is opening soon.')
-        }
+        onNavigate={scrollToSection}
+        onPlay={() => openLobby()}
+        onMusicToggle={handleMusicToggle}
+        musicEnabled={isMusicEnabled}
       />
 
-      <div
-        className={`toast ${notice ? 'toast--visible' : ''}`}
-        role="status"
-        aria-live="polite"
-      >
+      <div className={`toast ${notice ? 'toast--visible' : ''}`} role="status" aria-live="polite">
         {notice}
       </div>
     </main>

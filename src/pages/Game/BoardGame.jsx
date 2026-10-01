@@ -1,4 +1,5 @@
 import { useMemo, useState, useCallback, useRef, useEffect } from 'react';
+import BrandLogo, { BrandMark } from '../../components/BrandLogo';
 import GoldButton from '../../components/GoldButton';
 import {
   TOTAL_MATCH_TURNS,
@@ -110,134 +111,134 @@ const START_SPACE = 0;
 // that price them still draw and display but settle at nothing owed.
 const RAJAS_ORDER_DECK = [
   {
-    text: 'Advance to Brihadeeswara Boulevard.',
+    text: 'Advance to Brihadeeswara Boulevard',
     effect: { kind: 'advance', target: 39 },
   },
   {
-    text: 'Advance to Rajyabhishekam (Collect ₹2,00,000).',
+    text: 'Advance to Rajyabhishekam and collect ₹2,00,000',
     effect: { kind: 'advance', target: START_SPACE },
   },
   {
-    text: 'Advance to Rani Abbakka Avenue. If you pass Rajyabhishekam, collect ₹2,00,000.',
+    text: 'Advance to Rani Abbakka Avenue, if you pass Rajyabhishekam collect ₹2,00,000',
     effect: { kind: 'advance', target: 24 },
   },
   {
-    text: 'Advance to Wodeyar Mysuru Place. If you pass Rajyabhishekam, collect ₹2,00,000.',
+    text: 'Advance to Wodeyar Mysuru Place, if you pass Rajyabhishekam collect ₹2,00,000',
     effect: { kind: 'advance', target: 11 },
   },
   {
-    text: 'Advance to the nearest Express route. If unowned, you may buy it from the Bank. If owned, pay the owner twice the rent they are otherwise entitled to.',
+    text: 'Advance to the nearest Express route, if it is unowned you may buy it from the Bank and if it is owned pay the owner twice the usual rent',
     effect: { kind: 'nearest-route' },
   },
   {
-    text: 'Advance to the nearest Express route. If unowned, you may buy it from the Bank. If owned, pay the owner twice the rent they are otherwise entitled to.',
+    text: 'Advance to the nearest Express route, if it is unowned you may buy it from the Bank and if it is owned pay the owner twice the usual rent',
     effect: { kind: 'nearest-route' },
   },
   {
-    text: 'Advance token to the nearest Utility. If unowned, you may buy it from the Bank. If owned, throw the dice and pay the owner ten times the amount thrown × ₹1,000.',
+    text: 'Advance to the nearest Utility, if it is unowned you may buy it from the Bank and if it is owned throw the dice and pay the owner ten times the amount thrown × ₹1,000',
     effect: { kind: 'nearest-utility' },
   },
   {
-    text: 'The royal treasury pays you a dividend of ₹50,000.',
+    text: 'The royal treasury pays you a dividend of ₹50,000',
     effect: { kind: 'collect', amount: 50000 },
   },
   {
-    text: 'Get Out of Kaidi Kottai Free.',
+    text: 'Get Out of Kaidi Kottai Free',
     effect: { kind: 'pardon' },
   },
   {
-    text: 'Go back 3 spaces.',
+    text: 'Go back 3 spaces',
     effect: { kind: 'back', steps: 3 },
   },
   {
-    text: 'Go to Kaidi Kottai. Go directly to Kaidi Kottai, do not pass Rajyabhishekam, do not collect ₹2,00,000.',
+    text: 'Go directly to Kaidi Kottai, do not pass Rajyabhishekam and do not collect ₹2,00,000',
     effect: { kind: 'detention' },
   },
   {
-    text: 'Make general repairs on all your property. For each house pay ₹25,000. For each hotel pay ₹1,00,000.',
+    text: 'Make general repairs on all your property, pay ₹25,000 for each house and ₹1,00,000 for each hotel',
     effect: { kind: 'repairs', perHouse: 25000, perHotel: 100000 },
   },
   {
-    text: 'Chariot speeding fine ₹15,000.',
+    text: 'Chariot speeding fine of ₹15,000',
     effect: { kind: 'pay', amount: 15000 },
   },
   {
-    text: 'Take a trip to Chola Express. If you pass Rajyabhishekam, collect ₹2,00,000.',
+    text: 'Take a trip to the Pallavan Superfast Express, if you pass Rajyabhishekam collect ₹2,00,000',
     effect: { kind: 'advance', target: 5 },
   },
   {
-    text: 'You have been elected Chief of the Royal Council. Pay each player ₹50,000.',
+    text: 'You have been elected Chief of the Royal Council, pay each player ₹50,000',
     effect: { kind: 'pay-each', amount: 50000 },
   },
   {
-    text: 'Your building loan matures. Collect ₹1,50,000.',
+    text: 'Your building loan matures, collect ₹1,50,000',
     effect: { kind: 'collect', amount: 150000 },
   },
 ];
 
 const TEMPLE_HUNDI_DECK = [
   {
-    text: 'Advance to Rajyabhishekam (Collect ₹2,00,000).',
+    text: 'Advance to Rajyabhishekam and collect ₹2,00,000',
     effect: { kind: 'advance', target: START_SPACE },
   },
   {
-    text: 'Treasury error in your favour. Collect ₹2,00,000.',
+    text: 'Treasury error in your favour, collect ₹2,00,000',
     effect: { kind: 'collect', amount: 200000 },
   },
   {
-    text: "Royal vaidya's (physician's) fee. Pay ₹50,000.",
+    text: "Royal vaidya's (physician's) fee, pay ₹50,000",
     effect: { kind: 'pay', amount: 50000 },
   },
   {
-    text: 'From sale of grain stock you get ₹50,000.',
+    text: 'From the sale of grain stock you get ₹50,000',
     effect: { kind: 'collect', amount: 50000 },
   },
   {
-    text: 'Get Out of Kaidi Kottai Free.',
+    text: 'Get Out of Kaidi Kottai Free',
     effect: { kind: 'pardon' },
   },
   {
-    text: 'Go to Kaidi Kottai. Go directly to Kaidi Kottai, do not pass Rajyabhishekam, do not collect ₹2,00,000.',
+    text: 'Go directly to Kaidi Kottai, do not pass Rajyabhishekam and do not collect ₹2,00,000',
     effect: { kind: 'detention' },
   },
   {
-    text: 'Festival fund matures. Receive ₹1,00,000.',
+    text: 'Festival fund matures, receive ₹1,00,000',
     effect: { kind: 'collect', amount: 100000 },
   },
   {
-    text: 'Tax refund from the royal court. Collect ₹20,000.',
+    text: 'Tax refund from the royal court, collect ₹20,000',
     effect: { kind: 'collect', amount: 20000 },
   },
   {
-    text: 'It is your birthday. Collect ₹10,000 from every player.',
+    text: 'It is your birthday, collect ₹10,000 from every player',
     effect: { kind: 'collect-each', amount: 10000 },
   },
   {
-    text: 'Life insurance matures. Collect ₹1,00,000.',
+    text: 'Life insurance matures, collect ₹1,00,000',
     effect: { kind: 'collect', amount: 100000 },
   },
   {
-    text: 'Pay hospital fees of ₹1,00,000.',
+    text: 'Pay hospital fees of ₹1,00,000',
     effect: { kind: 'pay', amount: 100000 },
   },
   {
-    text: 'Pay gurukul (school) fees of ₹50,000.',
+    text: 'Pay gurukul (school) fees of ₹50,000',
     effect: { kind: 'pay', amount: 50000 },
   },
   {
-    text: 'Receive ₹25,000 consultancy fee.',
+    text: 'Receive a ₹25,000 consultancy fee',
     effect: { kind: 'collect', amount: 25000 },
   },
   {
-    text: 'You are assessed for street repair. ₹40,000 per house. ₹1,15,000 per hotel.',
+    text: 'You are assessed for street repair, ₹40,000 per house and ₹1,15,000 per hotel',
     effect: { kind: 'repairs', perHouse: 40000, perHotel: 115000 },
   },
   {
-    text: 'You have won second prize in a beauty contest. Collect ₹10,000.',
+    text: 'You have won second prize in a beauty contest, collect ₹10,000',
     effect: { kind: 'collect', amount: 10000 },
   },
   {
-    text: 'You inherit ₹1,00,000.',
+    text: 'You inherit ₹1,00,000',
     effect: { kind: 'collect', amount: 100000 },
   },
 ];
@@ -591,6 +592,10 @@ const gridCoordinates = [
   [11, 10],
 ];
 
+// Read only views of the board for the landing page, which draws its preview
+// and district guide straight from the game data.
+export { spaces as BOARD_SPACES, gridCoordinates as BOARD_GRID, STARTING_BALANCE };
+
 // buildPlayers is called inside the component with the actual props.
 const buildPlayers = (hostPiece, playerCount) => {
   const pieceOrder = seatPieces(hostPiece, playerCount);
@@ -635,6 +640,28 @@ const formatCurrency = (amount) => {
 // Full rupee amount in Indian lakh grouping, e.g. 200000 -> ₹2,00,000
 const formatRupees = (amount) => `₹${amount.toLocaleString('en-IN')}`;
 
+// Pip positions for each die face on a 100 unit square.
+const PIP_LAYOUT = {
+  1: [[50, 50]],
+  2: [[28, 28], [72, 72]],
+  3: [[28, 28], [50, 50], [72, 72]],
+  4: [[28, 28], [72, 28], [28, 72], [72, 72]],
+  5: [[28, 28], [72, 28], [50, 50], [28, 72], [72, 72]],
+  6: [[28, 26], [72, 26], [28, 50], [72, 50], [28, 74], [72, 74]],
+};
+
+// One die drawn with pips, or a blank resting face before the first roll.
+function DieFace({ value }) {
+  return (
+    <svg className={`die-face ${value ? '' : 'die-face--idle'}`} viewBox="0 0 100 100" aria-hidden="true">
+      <rect x="3" y="3" width="94" height="94" rx="22" />
+      {(PIP_LAYOUT[value] || []).map(([cx, cy]) => (
+        <circle key={`${cx}-${cy}`} cx={cx} cy={cy} r="8.5" />
+      ))}
+    </svg>
+  );
+}
+
 export default function BoardGame({ onExit, playerCount = 2, hostPiece = 'lamp', isMusicEnabled = false, onMusicToggle }) {
   const players = useMemo(
     () => buildPlayers(hostPiece, playerCount),
@@ -677,7 +704,7 @@ export default function BoardGame({ onExit, playerCount = 2, hostPiece = 'lamp',
   const [showMatchInfo, setShowMatchInfo] = useState(false);
   const [gameOver, setGameOver] = useState(false);
   const [activityText, setActivityText] = useState(
-    'Your journey begins at Rajyabhishekam. Roll the royal dice.',
+    'Your journey begins at Rajyabhishekam\nRoll the royal dice to begin',
   );
   const [doublesCount, setDoublesCount] = useState(initialDoublesCount);
   // Unused Get Out of Kaidi Kottai Free cards, held until detention rules land.
@@ -996,7 +1023,7 @@ export default function BoardGame({ onExit, playerCount = 2, hostPiece = 'lamp',
       const card = drawCard(deck);
       const player = players.find((entry) => entry.id === playerId);
       const opponents = players.filter((entry) => entry.id !== playerId);
-      const isHost = playerId === 'host';
+      const isHost = playerId === 'p1';
       const subject = isHost ? 'You' : player.name;
       const possessive = isHost ? 'your' : `${player.name}'s`;
 
@@ -1020,9 +1047,9 @@ export default function BoardGame({ onExit, playerCount = 2, hostPiece = 'lamp',
           const awarded = awardStartReward(playerId, passed);
           let message = `${subject} ${isHost ? 'advance' : 'advances'} to ${
             spaces[effect.target].name
-          }.`;
+          }`;
           if (awarded) {
-            message += ` ${formatRupees(START_REWARD)} collected at Rajyabhishekam.`;
+            message += `\n${formatRupees(START_REWARD)} collected at Rajyabhishekam`;
           }
           return message;
         }
@@ -1044,11 +1071,11 @@ export default function BoardGame({ onExit, playerCount = 2, hostPiece = 'lamp',
 
           let message = `${subject} ${isHost ? 'advance' : 'advances'} to ${
             spaces[target].name
-          }.`;
+          }`;
           if (awarded) {
-            message += ` ${formatRupees(START_REWARD)} collected at Rajyabhishekam.`;
+            message += `\n${formatRupees(START_REWARD)} collected at Rajyabhishekam`;
           }
-          message += ' Nothing is owed — ownership and rent arrive in a later update.';
+          message += '\nNo rent is charged when a card moves you here';
           return message;
         }
 
@@ -1062,7 +1089,7 @@ export default function BoardGame({ onExit, playerCount = 2, hostPiece = 'lamp',
           const landed = spaces[positionsRef.current[playerId]];
           const message = `${subject} ${
             isHost ? 'retreat' : 'retreats'
-          } ${effect.steps} spaces to ${landed.name}.`;
+          } ${effect.steps} spaces to ${landed.name}`;
 
           // Retreating three from the last Raja's Order lands on Temple Hundi,
           // which draws in turn. Only this card can do that, so the nesting
@@ -1073,7 +1100,7 @@ export default function BoardGame({ onExit, playerCount = 2, hostPiece = 'lamp',
               landed.name,
               landed.type === 'chance' ? RAJAS_ORDER_DECK : TEMPLE_HUNDI_DECK,
             );
-            return `${message} ${nested}`;
+            return `${message}\n${nested}`;
           }
 
           return message;
@@ -1088,21 +1115,21 @@ export default function BoardGame({ onExit, playerCount = 2, hostPiece = 'lamp',
           // walks past it.
           return `${subject} ${
             isHost ? 'are' : 'is'
-          } sent straight to Kaidi Kottai. No Rajyabhishekam reward.`;
+          } sent straight to Kaidi Kottai\nNo Rajyabhishekam reward`;
         }
 
         case 'collect': {
           adjustBalance(playerId, effect.amount);
           return `${subject} ${isHost ? 'collect' : 'collects'} ${formatRupees(
             effect.amount,
-          )}.`;
+          )}`;
         }
 
         case 'pay': {
           adjustBalance(playerId, -effect.amount);
           return `${subject} ${isHost ? 'pay' : 'pays'} ${formatRupees(
             effect.amount,
-          )}.`;
+          )}`;
         }
 
         case 'pay-each': {
@@ -1115,7 +1142,7 @@ export default function BoardGame({ onExit, playerCount = 2, hostPiece = 'lamp',
             effect.amount,
           )} to each of the other ${
             opponents.length === 1 ? 'player' : 'players'
-          } — ${formatRupees(effect.amount * opponents.length)} in all.`;
+          }, ${formatRupees(effect.amount * opponents.length)} in all`;
         }
 
         case 'collect-each': {
@@ -1128,7 +1155,7 @@ export default function BoardGame({ onExit, playerCount = 2, hostPiece = 'lamp',
             effect.amount,
           )} from each of the other ${
             opponents.length === 1 ? 'player' : 'players'
-          } — ${formatRupees(effect.amount * opponents.length)} in all.`;
+          }, ${formatRupees(effect.amount * opponents.length)} in all`;
         }
 
         case 'pardon': {
@@ -1139,18 +1166,18 @@ export default function BoardGame({ onExit, playerCount = 2, hostPiece = 'lamp',
 
           return `${subject} ${
             isHost ? 'keep' : 'keeps'
-          } the pardon. It will free ${possessive} token once detention rules arrive.`;
+          } the pardon, it will free ${possessive} token once detention rules arrive`;
         }
 
         case 'repairs': {
           // Houses and hotels do not exist yet, so the assessment totals zero.
           return `${subject} ${
             isHost ? 'owe' : 'owes'
-          } nothing — there are no houses or hotels on the board yet.`;
+          } nothing for repairs this time`;
         }
 
         default:
-          return `${subject} ${isHost ? 'draw' : 'draws'} a card.`;
+          return `${subject} ${isHost ? 'draw' : 'draws'} a card`;
       }
     },
     [
@@ -1203,7 +1230,7 @@ export default function BoardGame({ onExit, playerCount = 2, hostPiece = 'lamp',
       if (newAIDoublesCount === 3) {
         // Three doubles in a row - send to Kaidi Kottai (space 10)
         setActivityText(
-          `${aiPlayerName} rolled doubles three times! ${aiPlayerName} must go to Kaidi Kottai (Detention).`
+          `${aiPlayerName} rolled doubles three times\n${aiPlayerName} must go to Kaidi Kottai (Detention)`
         );
         setPlayerPosition(aiPlayerId, DETENTION_SPACE);
         setDoublesCount((prev) => ({ ...prev, [aiPlayerId]: 0 }));
@@ -1215,7 +1242,7 @@ export default function BoardGame({ onExit, playerCount = 2, hostPiece = 'lamp',
         setDice1(null);
         setDice2(null);
         setActivityText(
-          matchEnded ? 'Match complete after 248 turns.' : 'Your turn.',
+          matchEnded ? `Match complete after ${TOTAL_MATCH_TURNS} turns` : 'Your turn',
         );
 
         movementInProgressRef.current = false;
@@ -1227,8 +1254,8 @@ export default function BoardGame({ onExit, playerCount = 2, hostPiece = 'lamp',
     }
 
     const rollMessage = aiIsDouble
-      ? `${aiPlayerName} rolled doubles: ${aiDice1} + ${aiDice2} = ${aiTotal}. ${aiPlayerName}'s token is moving...`
-      : `${aiPlayerName} rolled ${aiDice1} + ${aiDice2} = ${aiTotal}. ${aiPlayerName}'s token is moving...`;
+      ? `${aiPlayerName} rolled doubles ${aiDice1} + ${aiDice2} = ${aiTotal}\n${aiPlayerName}'s token is moving`
+      : `${aiPlayerName} rolled ${aiDice1} + ${aiDice2} = ${aiTotal}\n${aiPlayerName}'s token is moving`;
     setActivityText(rollMessage);
 
     await new Promise((resolve) => setTimeout(resolve, 600));
@@ -1251,21 +1278,21 @@ export default function BoardGame({ onExit, playerCount = 2, hostPiece = 'lamp',
       audioHooksRef.current.utilityLand();
     }
 
-    let message = `${aiPlayerName} advanced ${aiTotal} spaces to ${landedSpace.name}.`;
+    let message = `${aiPlayerName} advanced ${aiTotal} spaces to ${landedSpace.name}`;
     if (awarded) {
-      message += ` ${aiPlayerName} received ${formatCurrency(START_REWARD)} for passing Rajyabhishekam.`;
+      message += `\n${aiPlayerName} received ${formatCurrency(START_REWARD)} for passing Rajyabhishekam`;
     }
 
     // A card draw is part of resolving the destination, so it happens before
     // the turn is committed.
     if (landedSpace.type === 'chance' || landedSpace.type === 'community') {
-      setActivityText(`${message} ${aiPlayerName} draws a card...`);
+      setActivityText(`${message}\n${aiPlayerName} draws a card`);
       const cardOutcome = await resolveDrawnCard(
         aiPlayerId,
         landedSpace.name,
         landedSpace.type === 'chance' ? RAJAS_ORDER_DECK : TEMPLE_HUNDI_DECK,
       );
-      message += ` ${cardOutcome}`;
+      message += `\n${cardOutcome}`;
     }
 
     // Property economics: rent or purchase
@@ -1280,14 +1307,14 @@ export default function BoardGame({ onExit, playerCount = 2, hostPiece = 'lamp',
             await handleInsolvency(aiPlayerId, rent, deed.owner);
           } else {
             transferCash(aiPlayerId, deed.owner, rent);
-            message += ` Paid ${formatRupees(rent)} rent.`;
+            message += `\nPaid ${formatRupees(rent)} rent`;
           }
         }
       } else if (!deed && landedSpace.price) {
         // Unowned and purchasable - AI decides
         aiDecidePurchase(aiPlayerId, landedSpace);
         if (balances[aiPlayerId] >= landedSpace.price) {
-          message += ` Purchased ${landedSpace.name}.`;
+          message += `\nPurchased ${landedSpace.name}`;
         }
       }
     }
@@ -1300,7 +1327,7 @@ export default function BoardGame({ onExit, playerCount = 2, hostPiece = 'lamp',
     setDice1(null);
     setDice2(null);
 
-    message += matchEnded ? ' Match complete after 248 turns.' : ' Your turn.';
+    message += matchEnded ? `\nMatch complete after ${TOTAL_MATCH_TURNS} turns` : '\nYour turn';
 
     setActivityText(message);
     movementInProgressRef.current = false;
@@ -1355,7 +1382,7 @@ export default function BoardGame({ onExit, playerCount = 2, hostPiece = 'lamp',
 
     movementInProgressRef.current = true;
     setIsRolling(true);
-    setActivityText('The royal dice are rolling...');
+    setActivityText('The royal dice are rolling');
 
     // Play dice roll audio hook
     audioHooksRef.current.diceRoll();
@@ -1380,7 +1407,7 @@ export default function BoardGame({ onExit, playerCount = 2, hostPiece = 'lamp',
       if (newDoublesCount === 3) {
         // Three doubles in a row - send to Kaidi Kottai (space 10)
         setActivityText(
-          `Doubles three times! You must go to Kaidi Kottai (Detention).`
+          'Doubles three times\nYou must go to Kaidi Kottai (Detention)'
         );
         setPlayerPosition('p1', DETENTION_SPACE);
         setDoublesCount((prev) => ({ ...prev, p1: 0 }));
@@ -1393,12 +1420,12 @@ export default function BoardGame({ onExit, playerCount = 2, hostPiece = 'lamp',
         if (matchEnded) {
           setDice1(null);
           setDice2(null);
-          setActivityText('Match complete after 248 turns.');
+          setActivityText(`Match complete after ${TOTAL_MATCH_TURNS} turns`);
           movementInProgressRef.current = false;
           return;
         }
 
-        setActivityText('Arjun is preparing his move...');
+        setActivityText(`${players[1]?.name ?? 'Your opponent'} is preparing a move`);
 
         await new Promise((resolve) => setTimeout(resolve, 850));
         movementInProgressRef.current = false;
@@ -1411,8 +1438,8 @@ export default function BoardGame({ onExit, playerCount = 2, hostPiece = 'lamp',
     }
 
     const rollMessage = isDouble
-      ? `You rolled doubles: ${d1} + ${d2} = ${total}. Your token is moving...`
-      : `You rolled ${d1} + ${d2} = ${total}. Your token is moving...`;
+      ? `You rolled doubles ${d1} + ${d2} = ${total}\nYour token is moving`
+      : `You rolled ${d1} + ${d2} = ${total}\nYour token is moving`;
     setActivityText(rollMessage);
 
     await new Promise((resolve) => setTimeout(resolve, 400));
@@ -1435,9 +1462,9 @@ export default function BoardGame({ onExit, playerCount = 2, hostPiece = 'lamp',
       audioHooksRef.current.utilityLand();
     }
 
-    let finalMessage = `You advanced ${total} spaces to ${landedSpace.name}.`;
+    let finalMessage = `You advanced ${total} spaces to ${landedSpace.name}`;
     if (awarded) {
-      finalMessage += ` You received ${formatCurrency(START_REWARD)} for passing Rajyabhishekam.`;
+      finalMessage += `\nYou received ${formatCurrency(START_REWARD)} for passing Rajyabhishekam`;
     }
 
     setActivityText(finalMessage);
@@ -1445,13 +1472,13 @@ export default function BoardGame({ onExit, playerCount = 2, hostPiece = 'lamp',
     // A card draw is part of resolving the destination, so it happens before
     // the turn is committed.
     if (landedSpace.type === 'chance' || landedSpace.type === 'community') {
-      setActivityText(`${finalMessage} Drawing a card...`);
+      setActivityText(`${finalMessage}\nDrawing a card`);
       const cardOutcome = await resolveDrawnCard(
         'p1',
         landedSpace.name,
         landedSpace.type === 'chance' ? RAJAS_ORDER_DECK : TEMPLE_HUNDI_DECK,
       );
-      finalMessage += ` ${cardOutcome}`;
+      finalMessage += `\n${cardOutcome}`;
       setActivityText(finalMessage);
     }
 
@@ -1467,7 +1494,7 @@ export default function BoardGame({ onExit, playerCount = 2, hostPiece = 'lamp',
             await handleInsolvency('p1', rent, deed.owner);
           } else {
             transferCash('p1', deed.owner, rent);
-            finalMessage += ` Paid ${formatRupees(rent)} rent.`;
+            finalMessage += `\nPaid ${formatRupees(rent)} rent`;
             setActivityText(finalMessage);
           }
         }
@@ -1481,7 +1508,7 @@ export default function BoardGame({ onExit, playerCount = 2, hostPiece = 'lamp',
     const matchEnded = commitTurn();
 
     if (matchEnded) {
-      setActivityText(`${finalMessage} Match complete after 248 turns.`);
+      setActivityText(`${finalMessage}\nMatch complete after ${TOTAL_MATCH_TURNS} turns`);
       movementInProgressRef.current = false;
       return;
     }
@@ -1490,7 +1517,7 @@ export default function BoardGame({ onExit, playerCount = 2, hostPiece = 'lamp',
     movementInProgressRef.current = false;
 
     // Activity text will be set by the next player's turn (auto-triggered by useEffect)
-    setActivityText(`${finalMessage} Preparing next turn...`);
+    setActivityText(`${finalMessage}\nPreparing the next turn`);
   }, [
     isRolling,
     isMoving,
@@ -1508,22 +1535,22 @@ export default function BoardGame({ onExit, playerCount = 2, hostPiece = 'lamp',
     transferCash,
     handleInsolvency,
     offerPurchase,
+    players,
   ]);
 
   return (
     <main className="board-game-page">
       <header className="board-topbar">
-        <button className="lobby-brand" type="button" onClick={onExit}>
-          <span className="brand-mark">M</span>
-          <span>MANAPALLY</span>
+        <button className="lobby-brand" type="button" onClick={onExit} aria-label="Leave the game">
+          <BrandLogo size={22} />
         </button>
 
         <div className="round-indicator">
-          <span>Match Turns</span>
+          <span>Turn</span>
           <strong>{turnCount.toString().padStart(3, '0')}</strong>
-          <i />
-          <span>/ {TOTAL_MATCH_TURNS}</span>
+          <span>of {TOTAL_MATCH_TURNS}</span>
           <button
+            type="button"
             className="match-info-button"
             onClick={() => setShowMatchInfo(true)}
             aria-label="How match length works"
@@ -1533,16 +1560,27 @@ export default function BoardGame({ onExit, playerCount = 2, hostPiece = 'lamp',
           </button>
         </div>
 
-        <div style={{ display: 'flex', gap: '12px', alignItems: 'center' }}>
+        <div className="board-topbar-actions">
           {onMusicToggle && (
             <button
               className="music-toggle-button"
               type="button"
               onClick={onMusicToggle}
+              aria-pressed={isMusicEnabled}
               aria-label={isMusicEnabled ? 'Mute music' : 'Play music'}
               title={isMusicEnabled ? 'Mute music' : 'Play music'}
             >
-              {isMusicEnabled ? '🔊' : '🔇'}
+              <svg viewBox="0 0 24 24" aria-hidden="true">
+                <path className="music-icon-body" d="M4 9.5h3.2L12 5.5v13l-4.8-4H4z" />
+                {isMusicEnabled ? (
+                  <>
+                    <path d="M15.5 9a4 4 0 0 1 0 6" />
+                    <path d="M18 6.5a7.5 7.5 0 0 1 0 11" />
+                  </>
+                ) : (
+                  <path d="m16 9.5 5 5m0-5-5 5" />
+                )}
+              </svg>
             </button>
           )}
           <button className="lobby-back" type="button" onClick={onExit}>
@@ -1563,7 +1601,9 @@ export default function BoardGame({ onExit, playerCount = 2, hostPiece = 'lamp',
                 }`}
                 key={player.id}
               >
-                <PieceMark piece={player.pieceKey} variant="token" title={player.name} />
+                <span className="game-player-token">
+                  <PieceMark piece={player.pieceKey} variant="token" title={player.name} />
+                </span>
 
                 <div>
                   <strong>{player.name}</strong>
@@ -1589,8 +1629,8 @@ export default function BoardGame({ onExit, playerCount = 2, hostPiece = 'lamp',
           </div>
 
           <div className="match-notice">
-            <span>✦</span>
-            <p>{activityText}</p>
+            <p className="match-notice-label">Latest move</p>
+            <p className="match-notice-text" aria-live="polite">{activityText}</p>
           </div>
         </aside>
 
@@ -1678,12 +1718,13 @@ export default function BoardGame({ onExit, playerCount = 2, hostPiece = 'lamp',
                   {playersOnSpace.length > 0 && (
                     <div className="space-tokens">
                       {playersOnSpace.map((player) => (
-                        <PieceMark
-                          piece={player.pieceKey}
-                          variant="token"
-                          title={player.name}
-                          key={player.id}
-                        />
+                        <span className={`board-token seat-${player.pieceKey}`} key={player.id}>
+                          <PieceMark
+                            piece={player.pieceKey}
+                            variant="token"
+                            title={player.name}
+                          />
+                        </span>
                       ))}
                     </div>
                   )}
@@ -1692,7 +1733,7 @@ export default function BoardGame({ onExit, playerCount = 2, hostPiece = 'lamp',
             })}
 
             {/* Direction indicator - clockwise arrow */}
-            <div className="board-direction-indicator" aria-label="Movement direction: clockwise">
+            <div className="board-direction-indicator" aria-label="Movement direction is clockwise">
               <svg viewBox="0 0 100 100" className="direction-arrow">
                 <path
                   d="M 50 10 A 40 40 0 1 1 10 50"
@@ -1706,11 +1747,11 @@ export default function BoardGame({ onExit, playerCount = 2, hostPiece = 'lamp',
             </div>
 
             <div className="board-centre-art">
-              <span className="centre-crown">✦</span>
+              <BrandMark size={64} className="centre-crown" />
 
-              <h1>MANAPALLY</h1>
+              <h1>Manapally</h1>
 
-              <p>THE ROYAL STRATEGY GAME</p>
+              <p>Premium South Indian Strategy Board Game</p>
 
               <div className="centre-divider" />
 
@@ -1729,7 +1770,7 @@ export default function BoardGame({ onExit, playerCount = 2, hostPiece = 'lamp',
                 className="drawn-card"
                 role="status"
                 aria-live="polite"
-                aria-label={`${drawnCard.deckName}: ${drawnCard.text}`}
+                aria-label={`${drawnCard.deckName}, ${drawnCard.text}`}
               >
                 <span className="drawn-card-deck">{drawnCard.deckName}</span>
                 <div className="drawn-card-rule" />
@@ -1749,43 +1790,69 @@ export default function BoardGame({ onExit, playerCount = 2, hostPiece = 'lamp',
             if (!space || !player) return null;
 
             const canAfford = balances[purchaseOffer.playerId] >= space.price;
+            const remaining = balances[purchaseOffer.playerId] - space.price;
+            const accentColor = space.colorGroup
+              ? `var(--color-${space.colorGroup})`
+              : space.type === 'route'
+                ? '#2f6170'
+                : '#a46f17';
 
             return (
               <div className="drawn-card-overlay">
-                <div className="property-card purchase-offer">
-                  <h3 className="property-card-title">Purchase {space.name}?</h3>
+                <div
+                  className="property-card purchase-offer"
+                  role="dialog"
+                  aria-labelledby="purchase-offer-title"
+                >
+                  <header className="property-card-header">
+                    <div
+                      className="property-card-color-bar"
+                      style={{ background: accentColor }}
+                    />
+                    <p className="property-card-kicker">For sale</p>
+                    <h3 id="purchase-offer-title">{space.name}</h3>
+                  </header>
 
-                  <div className="property-card-row">
-                    <span>Price</span>
-                    <strong style={{ color: canAfford ? '#5fae8c' : '#c2564f' }}>
-                      {formatRupees(space.price)}
-                    </strong>
-                  </div>
-
-                  <div className="property-card-row">
-                    <span>Your Balance</span>
-                    <span>{formatRupees(balances[purchaseOffer.playerId])}</span>
-                  </div>
-
-                  {!canAfford && (
-                    <div className="property-card-row" style={{ color: '#c2564f', fontSize: '0.85rem' }}>
-                      <span>⚠ Insufficient funds</span>
+                  <div className="property-card-body">
+                    <div className="property-card-row">
+                      <span>Price</span>
+                      <strong className={canAfford ? 'amount-positive' : 'amount-negative'}>
+                        {formatRupees(space.price)}
+                      </strong>
                     </div>
-                  )}
 
-                  <div className="purchase-offer-actions">
-                    <GoldButton
-                      onClick={() => handlePurchaseDecision(true)}
-                      disabled={!canAfford}
-                    >
-                      Buy Property
-                    </GoldButton>
-                    <GoldButton
-                      variant="ghost"
-                      onClick={() => handlePurchaseDecision(false)}
-                    >
-                      Decline
-                    </GoldButton>
+                    <div className="property-card-row">
+                      <span>Your balance</span>
+                      <span>{formatRupees(balances[purchaseOffer.playerId])}</span>
+                    </div>
+
+                    <div className="property-card-row">
+                      <span>{canAfford ? 'Balance after buying' : 'Shortfall'}</span>
+                      <span className={canAfford ? '' : 'amount-negative'}>
+                        {formatRupees(Math.abs(remaining))}
+                      </span>
+                    </div>
+
+                    {!canAfford && (
+                      <p className="property-card-note property-card-note--warning">
+                        You do not have enough cash to buy this space right now
+                      </p>
+                    )}
+
+                    <div className="purchase-offer-actions">
+                      <GoldButton
+                        onClick={() => handlePurchaseDecision(true)}
+                        disabled={!canAfford}
+                      >
+                        Buy property
+                      </GoldButton>
+                      <GoldButton
+                        variant="ghost"
+                        onClick={() => handlePurchaseDecision(false)}
+                      >
+                        Decline
+                      </GoldButton>
+                    </div>
                   </div>
                 </div>
               </div>
@@ -1816,24 +1883,30 @@ export default function BoardGame({ onExit, playerCount = 2, hostPiece = 'lamp',
                   if (!isRoute && !isUtility && !details) return null;
 
                   const accentColor = isRoute
-                    ? '#3c4f5c'
+                    ? '#2f6170'
                     : isUtility
-                      ? '#c89b43'
+                      ? '#a46f17'
                       : space.colorGroup
-                        ? getComputedStyle(document.documentElement).getPropertyValue(
-                            `--color-${space.colorGroup}`,
-                          ) || '#888'
+                        ? `var(--color-${space.colorGroup})`
                         : '#888';
+
+                  const kicker = isRoute
+                    ? 'Express route'
+                    : isUtility
+                      ? 'Utility'
+                      : 'District';
 
                   return (
                     <>
                       <header className="property-card-header">
                         <div
                           className="property-card-color-bar"
-                          style={{ backgroundColor: accentColor }}
+                          style={{ background: accentColor }}
                         />
+                        <p className="property-card-kicker">{kicker}</p>
                         <h3 id="property-card-title">{space.name}</h3>
                         <button
+                          type="button"
                           className="property-card-close"
                           onClick={() => setSelectedProperty(null)}
                           aria-label="Close property details"
@@ -1845,41 +1918,41 @@ export default function BoardGame({ onExit, playerCount = 2, hostPiece = 'lamp',
                       {isRoute && (
                         <div className="property-card-body">
                           <div className="property-card-row">
-                            <span>Purchase Price</span>
+                            <span>Purchase price</span>
                             <strong>{formatRupees(routeDetails.price)}</strong>
                           </div>
 
                           <div className="property-card-section">
-                            <h4>Rent by Routes Owned</h4>
+                            <h4>Rent by routes owned</h4>
                             <div className="property-card-row">
-                              <span>1 Route Owned</span>
+                              <span>1 route owned</span>
                               <span>{formatRupees(routeDetails.rent[0])}</span>
                             </div>
                             <div className="property-card-row">
-                              <span>2 Routes Owned</span>
+                              <span>2 routes owned</span>
                               <span>{formatRupees(routeDetails.rent[1])}</span>
                             </div>
                             <div className="property-card-row">
-                              <span>3 Routes Owned</span>
+                              <span>3 routes owned</span>
                               <span>{formatRupees(routeDetails.rent[2])}</span>
                             </div>
                             <div className="property-card-row">
-                              <span>4 Routes Owned</span>
+                              <span>4 routes owned</span>
                               <strong>{formatRupees(routeDetails.rent[3])}</strong>
                             </div>
                           </div>
 
                           <div className="property-card-section">
                             <div className="property-card-row">
-                              <span>Mortgage Value</span>
+                              <span>Mortgage value</span>
                               <span>{formatRupees(routeDetails.mortgage)}</span>
                             </div>
                           </div>
 
                           <p className="property-card-note">
-                            All four express routes — Chola, Pandya, Chera and
-                            Vijayanagara — share this schedule. Rent rises with how
-                            many routes a single owner holds, not with houses.
+                            All four express route spaces, two on the Pallavan Superfast
+                            Express and two on The Farakka Express, share this schedule
+                            and rent rises with how many routes a single owner holds
                           </p>
                         </div>
                       )}
@@ -1887,12 +1960,12 @@ export default function BoardGame({ onExit, playerCount = 2, hostPiece = 'lamp',
                       {isUtility && (
                         <div className="property-card-body">
                           <div className="property-card-row">
-                            <span>Purchase Price</span>
+                            <span>Purchase price</span>
                             <strong>{formatRupees(utilityDetails.price)}</strong>
                           </div>
 
                           <div className="property-card-section">
-                            <h4>Rent by Dice Roll</h4>
+                            <h4>Rent by dice roll</h4>
                             <div className="property-card-row">
                               <span>Owning one utility</span>
                               <span>
@@ -1911,15 +1984,14 @@ export default function BoardGame({ onExit, playerCount = 2, hostPiece = 'lamp',
 
                           <div className="property-card-section">
                             <div className="property-card-row">
-                              <span>Mortgage Value</span>
+                              <span>Mortgage value</span>
                               <span>{formatRupees(utilityDetails.mortgage)}</span>
                             </div>
                           </div>
 
                           <p className="property-card-note">
-                            Kaveri Power Company and Tungabhadra Water Works share
-                            this schedule. A utility charges a multiple of the roll
-                            that landed on it, so a 7 costs{' '}
+                            Kaveri Power Company and Tungabhadra Water Works share this
+                            schedule, a roll of 7 costs{' '}
                             {formatRupees(
                               utilityDetails.multipliers[0] * 7 * utilityDetails.perPip,
                             )}{' '}
@@ -1927,7 +1999,7 @@ export default function BoardGame({ onExit, playerCount = 2, hostPiece = 'lamp',
                             {formatRupees(
                               utilityDetails.multipliers[1] * 7 * utilityDetails.perPip,
                             )}{' '}
-                            against both.
+                            against both
                           </p>
                         </div>
                       )}
@@ -1935,48 +2007,53 @@ export default function BoardGame({ onExit, playerCount = 2, hostPiece = 'lamp',
                       {!isRoute && !isUtility && (
                         <div className="property-card-body">
                           <div className="property-card-row">
-                            <span>Purchase Price</span>
+                            <span>Purchase price</span>
                             <strong>{formatCurrency(space.price)}</strong>
                           </div>
 
                           <div className="property-card-section">
-                            <h4>Rent Schedule</h4>
+                            <h4>Rent schedule</h4>
                             <div className="property-card-row">
-                              <span>Base Rent</span>
+                              <span>Base rent</span>
                               <span>{formatCurrency(details.rent[0])}</span>
                             </div>
                             <div className="property-card-row">
-                              <span>With 1 House</span>
+                              <span>With 1 house</span>
                               <span>{formatCurrency(details.rent[1])}</span>
                             </div>
                             <div className="property-card-row">
-                              <span>With 2 Houses</span>
+                              <span>With 2 houses</span>
                               <span>{formatCurrency(details.rent[2])}</span>
                             </div>
                             <div className="property-card-row">
-                              <span>With 3 Houses</span>
+                              <span>With 3 houses</span>
                               <span>{formatCurrency(details.rent[3])}</span>
                             </div>
                             <div className="property-card-row">
-                              <span>With 4 Houses</span>
+                              <span>With 4 houses</span>
                               <span>{formatCurrency(details.rent[4])}</span>
                             </div>
                             <div className="property-card-row">
-                              <span>With Hotel</span>
+                              <span>With a hotel</span>
                               <strong>{formatCurrency(details.rent[5])}</strong>
                             </div>
                           </div>
 
                           <div className="property-card-section">
                             <div className="property-card-row">
-                              <span>House Cost</span>
+                              <span>House cost</span>
                               <span>{formatCurrency(details.houseCost)}</span>
                             </div>
                             <div className="property-card-row">
-                              <span>Mortgage Value</span>
+                              <span>Mortgage value</span>
                               <span>{formatCurrency(details.mortgage)}</span>
                             </div>
                           </div>
+
+                          <p className="property-card-note">
+                            Own every district in this colour family to start building,
+                            houses go up evenly across the family before a hotel
+                          </p>
                         </div>
                       )}
 
@@ -2001,6 +2078,7 @@ export default function BoardGame({ onExit, playerCount = 2, hostPiece = 'lamp',
                             {!deed.mortgaged && (
                               <>
                                 <button
+                                  type="button"
                                   className="property-action-btn"
                                   disabled={!canBuildHouse || balances['p1'] < buildCost}
                                   onClick={() => {
@@ -2017,11 +2095,12 @@ export default function BoardGame({ onExit, playerCount = 2, hostPiece = 'lamp',
                                       });
                                     }
                                   }}
-                                  title={!canBuildHouse ? 'Need monopoly and even build' : `Build ${buildingType} for ${formatRupees(buildCost)}`}
+                                  title={!canBuildHouse ? 'Own the full colour family and build evenly first' : `Build a ${buildingType.toLowerCase()} for ${formatRupees(buildCost)}`}
                                 >
                                   Build {buildingType} ({formatRupees(buildCost)})
                                 </button>
                                 <button
+                                  type="button"
                                   className="property-action-btn"
                                   disabled={!canSellBuilding}
                                   onClick={() => {
@@ -2036,6 +2115,7 @@ export default function BoardGame({ onExit, playerCount = 2, hostPiece = 'lamp',
                                   Sell Building ({formatRupees(sellRevenue)})
                                 </button>
                                 <button
+                                  type="button"
                                   className="property-action-btn"
                                   disabled={!canMortgage}
                                   onClick={() => {
@@ -2046,7 +2126,7 @@ export default function BoardGame({ onExit, playerCount = 2, hostPiece = 'lamp',
                                     }));
                                     setBalances(prev => ({ ...prev, p1: prev.p1 + value }));
                                   }}
-                                  title={!canMortgage ? 'Cannot mortgage improved property' : `Mortgage for ${formatRupees(details.mortgage)}`}
+                                  title={!canMortgage ? 'Sell the buildings in this family before mortgaging' : `Mortgage for ${formatRupees(details.mortgage)}`}
                                 >
                                   Mortgage ({formatRupees(details.mortgage)})
                                 </button>
@@ -2054,6 +2134,7 @@ export default function BoardGame({ onExit, playerCount = 2, hostPiece = 'lamp',
                             )}
                             {deed.mortgaged && (
                               <button
+                                type="button"
                                 className="property-action-btn"
                                 disabled={balances['p1'] < unmortgageCost}
                                 onClick={() => {
@@ -2065,7 +2146,7 @@ export default function BoardGame({ onExit, playerCount = 2, hostPiece = 'lamp',
                                     }));
                                   }
                                 }}
-                                title={`Unmortgage for ${formatRupees(unmortgageCost)} (includes 10% interest)`}
+                                title={`Unmortgage for ${formatRupees(unmortgageCost)}, including 10% interest`}
                               >
                                 Unmortgage ({formatRupees(unmortgageCost)})
                               </button>
@@ -2093,8 +2174,10 @@ export default function BoardGame({ onExit, playerCount = 2, hostPiece = 'lamp',
                 aria-labelledby="dice-info-title"
               >
                 <header className="property-card-header">
-                  <h3 id="dice-info-title">How the Dice Works</h3>
+                  <p className="property-card-kicker">Fair play</p>
+                  <h3 id="dice-info-title">How the dice work</h3>
                   <button
+                    type="button"
                     className="property-card-close"
                     onClick={() => setShowDiceInfo(false)}
                     aria-label="Close dice information"
@@ -2105,80 +2188,79 @@ export default function BoardGame({ onExit, playerCount = 2, hostPiece = 'lamp',
 
                 <div className="property-card-body dice-info-body">
                   <p className="dice-info-intro">
-                    MANAPALLY uses cryptographically secure random number generation
-                    to ensure fair and unpredictable dice rolls.
+                    Manapally rolls with the cryptographically secure random generator
+                    built into your browser, so every roll is fair and unpredictable
                   </p>
 
                   <div className="property-card-section">
-                    <h4>🎲 Two Standard Dice</h4>
+                    <h4>Two standard dice</h4>
                     <p>
-                      Each turn rolls two six-sided dice (1-6). The values are shown
-                      separately, and your token moves the total number of spaces.
-                      Rolling doubles (same value on both dice) is tracked—three doubles
-                      in a row sends you to Kaidi Kottai (Detention)!
+                      Each turn rolls two six sided dice showing 1 to 6, both values are
+                      shown and your token moves their total, three doubles in a row
+                      sends you to Kaidi Kottai (Detention)
                     </p>
                   </div>
 
                   <div className="property-card-section">
-                    <h4>🔒 Why crypto.getRandomValues()?</h4>
+                    <h4>Why a cryptographic generator</h4>
                     <p>
-                      <strong>Math.random() is predictable and has tiny bias.</strong> It's a pseudo-random
-                      generator, so results are theoretically predictable. The distribution
-                      isn't perfectly uniform at the generator's precision level.
+                      The everyday random function in JavaScript is a pseudo random
+                      generator, its results can in theory be predicted and its spread is
+                      not perfectly even
                     </p>
                     <p>
-                      For gambling or security-related applications, we use <code>crypto.getRandomValues()</code>—the
-                      browser's built-in cryptographic random generator. This is the same
-                      technology used for encryption and security applications.
-                    </p>
-                  </div>
-
-                  <div className="property-card-section">
-                    <h4>⚖️ Perfectly Fair: Rejection Sampling</h4>
-                    <p>
-                      <code>getRandomValues</code> fills an array with random bytes (0-255).
-                      You can't simply do <code>byte % 6</code> because 256 doesn't divide
-                      evenly by 6 (256 = 6 × 42 + 4). Values 0-3 would appear 43 times
-                      while 4-5 appear only 42 times—this is called <strong>modulo bias</strong>.
-                    </p>
-                    <p>
-                      The fix: throw away any byte ≥252 (252 = 6 × 42) and draw again.
-                      The remaining 0-251 split into exactly 42 per outcome, making every
-                      face equally likely. The redraw chance is only 1.6%, so the loop
-                      almost never runs twice.
+                      Manapally uses <code>getRandomValues</code> from the Web Crypto API
+                      instead, the same technology browsers rely on for encryption
                     </p>
                   </div>
 
                   <div className="property-card-section">
-                    <h4>📊 Real Dice Probabilities</h4>
+                    <h4>Perfectly fair with rejection sampling</h4>
                     <p>
-                      Rolling two separate dice (not just generating a random 2-12) gives
-                      authentic probabilities:
+                      The generator produces random bytes from 0 to 255, and 256 does not
+                      divide evenly by 6 (256 = 6 × 42 + 4), so a plain remainder would
+                      make faces 1 to 4 appear 43 times for every 42 of faces 5 and 6,
+                      this is called <strong>modulo bias</strong>
+                    </p>
+                    <p>
+                      The fix is to discard any byte of 252 or more (252 = 6 × 42) and
+                      draw again, the remaining values split into exactly 42 per face and
+                      a redraw happens only 4 times in 256, so the loop almost never runs
+                      twice
+                    </p>
+                  </div>
+
+                  <div className="property-card-section">
+                    <h4>Real dice probabilities</h4>
+                    <p>
+                      Rolling two separate dice rather than one number from 2 to 12 gives
+                      authentic odds
                     </p>
                     <ul className="dice-probability-list">
-                      <li><strong>7</strong> is most common (6 ways to roll it)</li>
-                      <li><strong>6 and 8</strong> are very common (5 ways each)</li>
-                      <li><strong>2 and 12</strong> are rarest (1 way each)</li>
+                      <li><strong>7</strong> is the most common total with 6 ways to roll it</li>
+                      <li><strong>6 and 8</strong> follow closely with 5 ways each</li>
+                      <li><strong>2 and 12</strong> are the rarest with 1 way each</li>
                     </ul>
                     <p className="dice-info-note">
-                      This matches physical dice behavior perfectly.
+                      This matches physical dice exactly
                     </p>
                   </div>
 
                   <div className="property-card-section">
-                    <h4>🎯 The Algorithm</h4>
+                    <h4>The algorithm</h4>
                     <ol className="dice-info-steps">
-                      <li>Generate a random byte (0-255) using secure crypto API</li>
-                      <li>If byte ≥252, reject and generate a new one (rejection sampling)</li>
-                      <li>Take remainder when dividing by 6, giving 0-5</li>
-                      <li>Add 1 to get final result of 1-6</li>
-                      <li>Roll twice independently for two dice</li>
+                      <li>Draw a random byte from 0 to 255 with the Web Crypto API</li>
+                      <li>If the byte is 252 or more, discard it and draw again</li>
+                      <li>Divide by 6 and keep the remainder, giving 0 to 5</li>
+                      <li>Add 1 for a final face from 1 to 6</li>
+                      <li>Repeat independently for the second die</li>
                     </ol>
                   </div>
 
                   <p className="dice-info-footer">
-                    Every roll is unpredictable, fair, and mathematically sound.
-                    May fortune favor your strategy! ✦
+                    Every roll is unpredictable, fair and mathematically sound
+                    <br />
+                    May fortune favour your strategy
                   </p>
                 </div>
               </div>
@@ -2197,8 +2279,10 @@ export default function BoardGame({ onExit, playerCount = 2, hostPiece = 'lamp',
                 aria-labelledby="match-info-title"
               >
                 <header className="property-card-header">
-                  <h3 id="match-info-title">Match Length</h3>
+                  <p className="property-card-kicker">Match rules</p>
+                  <h3 id="match-info-title">Match length</h3>
                   <button
+                    type="button"
                     className="property-card-close"
                     onClick={() => setShowMatchInfo(false)}
                     aria-label="Close match information"
@@ -2209,42 +2293,44 @@ export default function BoardGame({ onExit, playerCount = 2, hostPiece = 'lamp',
 
                 <div className="property-card-body dice-info-body">
                   <p className="dice-info-intro">
-                    MANAPALLY is an original mathematical strategy game with a fixed 248-turn match.
+                    Manapally is an original strategy game played over a fixed match of{' '}
+                    {TOTAL_MATCH_TURNS} turns
                   </p>
 
                   <div className="property-card-section">
-                    <h4>📊 The 248-Turn Benchmark</h4>
+                    <h4>The {TOTAL_MATCH_TURNS} turn benchmark</h4>
                     <p>
-                      The 248-turn benchmark is inspired by simulation-based board-game analysis:
-                      automated models can run thousands of games to study how dice probabilities,
-                      player decisions, and event outcomes affect match length.
+                      The benchmark is inspired by simulation based board game analysis,
+                      automated models can play thousands of games to study how dice odds,
+                      player decisions and events shape the length of a match
                     </p>
                     <p>
-                      For a four-player table, 248 total turns corresponds to 62 turns per player.
-                      With fewer players, each player receives more turns before the shared 248-turn
-                      match ends.
-                    </p>
-                  </div>
-
-                  <div className="property-card-section">
-                    <h4>🏆 Winning</h4>
-                    <p>
-                      For the current cash-only version, the highest balance after Turn 248 wins.
-                      In future property-enabled matches, the highest net worth will win.
+                      At a four player table {TOTAL_MATCH_TURNS} total turns gives each
+                      player {TOTAL_MATCH_TURNS / 4}, with fewer players each person
+                      receives more turns before the shared count ends
                     </p>
                   </div>
 
                   <div className="property-card-section">
-                    <h4>♛ Rajyabhishekam</h4>
+                    <h4>Winning</h4>
                     <p>
-                      Passing or landing on Rajyabhishekam awards ₹2,00,000. It does not create
-                      or complete a round.
+                      In the current version the highest cash balance after turn{' '}
+                      {TOTAL_MATCH_TURNS} wins, future versions will score full net worth
+                    </p>
+                  </div>
+
+                  <div className="property-card-section">
+                    <h4>Rajyabhishekam</h4>
+                    <p>
+                      Passing or landing on Rajyabhishekam awards{' '}
+                      {formatRupees(START_REWARD)}, it does not start or complete a round
                     </p>
                   </div>
 
                   <p className="dice-info-footer">
-                    Every match is a fixed-duration strategic contest.
-                    Build your fortune wisely! ✦
+                    Every match is a fixed length strategic contest
+                    <br />
+                    Build your fortune wisely
                   </p>
                 </div>
               </div>
@@ -2256,15 +2342,17 @@ export default function BoardGame({ onExit, playerCount = 2, hostPiece = 'lamp',
           <p className="eyebrow">Current turn</p>
 
           <div className="turn-player">
-            <PieceMark piece={activePlayer.pieceKey} variant="token" title={activePlayer.name} />
+            <span className={`turn-token seat-${activePlayer.pieceKey}`}>
+              <PieceMark piece={activePlayer.pieceKey} variant="token" title={activePlayer.name} />
+            </span>
 
             <div>
               <strong>{activePlayer.name}</strong>
 
               <span>
-                {activePlayer.id === 'host'
-                  ? 'The court awaits your decision.'
-                  : 'Arjun is making his move.'}
+                {activePlayer.id === 'p1'
+                  ? 'The court awaits your decision'
+                  : `${activePlayer.name} is making a move`}
               </span>
             </div>
           </div>
@@ -2273,30 +2361,37 @@ export default function BoardGame({ onExit, playerCount = 2, hostPiece = 'lamp',
             className={`dice-display ${
               isRolling ? 'dice-display--rolling' : ''
             }`}
+            aria-live="polite"
+            aria-label={
+              dice1 !== null && dice2 !== null
+                ? `Rolled ${dice1} and ${dice2}, total ${dice1 + dice2}`
+                : 'Dice ready'
+            }
           >
-            {dice1 !== null && dice2 !== null ? (
-              <span>
-                {dice1} + {dice2}
-              </span>
-            ) : (
-              <span>✦</span>
-            )}
+            <div className="dice-pair">
+              <DieFace value={dice1} />
+              <DieFace value={dice2} />
+            </div>
+
+            <span className="dice-total">
+              {dice1 !== null && dice2 !== null ? `Total ${dice1 + dice2}` : 'Ready to roll'}
+            </span>
           </div>
 
           <div className="dice-info-row">
-            <p className="dice-transparency-label">Secure roll: crypto.getRandomValues</p>
+            <p className="dice-transparency-label">Secure roll by Web Crypto</p>
             <button
+              type="button"
               className="dice-info-button"
               onClick={() => setShowDiceInfo(true)}
-              aria-label="Learn how the dice works"
-              title="Learn how the dice works"
+              aria-label="Learn how the dice work"
+              title="Learn how the dice work"
             >
-              Do you wanna know how the dice works?
+              How the dice work
             </button>
           </div>
 
           <GoldButton
-            icon="◆"
             loading={isRolling || isMoving}
             disabled={gameOver || activePlayer.id !== 'p1' || isMoving}
             onClick={rollDiceHandler}
@@ -2311,7 +2406,7 @@ export default function BoardGame({ onExit, playerCount = 2, hostPiece = 'lamp',
           {gameOver && (
             <div className="match-result" role="status" aria-live="polite">
               <p className="match-result-label">
-                Match complete — {TOTAL_MATCH_TURNS} turns
+                Match complete after {TOTAL_MATCH_TURNS} turns
               </p>
 
               {matchResult.isTie ? (
@@ -2319,16 +2414,18 @@ export default function BoardGame({ onExit, playerCount = 2, hostPiece = 'lamp',
                   <strong className="match-result-winner">Tie</strong>
                   <p className="match-result-detail">
                     {matchResult.winners.map((p) => p.name).join(' and ')} finish
-                    level at {formatCurrency(matchResult.winningBalance)}.
+                    level at {formatCurrency(matchResult.winningBalance)}
                   </p>
                 </>
               ) : (
                 <>
                   <strong className="match-result-winner">
-                    {matchResult.winners[0].name} wins
+                    {matchResult.winners[0].name === 'You'
+                      ? 'You win'
+                      : `${matchResult.winners[0].name} wins`}
                   </strong>
                   <p className="match-result-detail">
-                    Highest balance: {formatCurrency(matchResult.winningBalance)}
+                    Highest balance {formatCurrency(matchResult.winningBalance)}
                   </p>
                 </>
               )}
@@ -2336,8 +2433,8 @@ export default function BoardGame({ onExit, playerCount = 2, hostPiece = 'lamp',
           )}
 
           <p className="turn-tip">
-            Complete a district family to unlock prestigious landmarks and
-            elevate your influence.
+            Tap any district, route or utility on the board to see its rent and
+            building costs
           </p>
         </aside>
       </section>
