@@ -625,3 +625,13 @@
   position: relative;
   z-index: 6;
 }
+
+.premium-ai-error {
+  grid-column: 1 / -1;
+  color: var(--danger);
+  font-size: 0.84rem;
+}
+
+.premium-ai-status--checking .status-dot {
+  background: var(--sage-400);
+}

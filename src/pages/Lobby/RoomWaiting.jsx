@@ -8,6 +8,7 @@ import {
   hasPremiumKey,
   onPremiumKeyChange,
   setPremiumKey,
+  verifyPremiumKey,
 } from '../../services/premiumAi';
 import { TOTAL_MATCH_TURNS } from '../Game/matchRules';
 import { PIECES, PieceMark } from '../Game/pieces.jsx';
@@ -27,6 +28,7 @@ export default function RoomWaiting({ session, onLeave }) {
   const [copyState, setCopyState] = useState('idle');
   const [hasKey, setHasKey] = useState(hasPremiumKey());
   const [hasDraft, setHasDraft] = useState(false);
+  const [keyStatus, setKeyStatus] = useState(hasPremiumKey() ? 'valid' : 'idle');
   const [showKeyInfo, setShowKeyInfo] = useState(false);
   const [openMenu, setOpenMenu] = useState(null);
   const keyInputRef = useRef(null);
@@ -78,17 +80,30 @@ export default function RoomWaiting({ session, onLeave }) {
 
   // The field is uncontrolled, so the key never enters React state. It goes
   // straight into the premium AI module's memory and the field is wiped.
-  const applyKey = () => {
+  // It is then checked with Anthropic; a rejected key is dropped at once.
+  const applyKey = async () => {
     const input = keyInputRef.current;
 
-    if (input && setPremiumKey(input.value)) {
-      input.value = '';
-      setHasDraft(false);
+    if (!input || keyStatus === 'checking' || !setPremiumKey(input.value)) {
+      return;
     }
+
+    input.value = '';
+    setHasDraft(false);
+    setKeyStatus('checking');
+
+    const result = await verifyPremiumKey();
+
+    if (result === 'invalid') {
+      clearPremiumKey();
+    }
+
+    setKeyStatus(result);
   };
 
   const forgetKey = () => {
     clearPremiumKey();
+    setKeyStatus('idle');
     seats.filter((seat) => seat.kind === 'ai').forEach((seat) => session.removeSeat(seat.seatId));
   };
 
@@ -262,7 +277,7 @@ export default function RoomWaiting({ session, onLeave }) {
                             type="button"
                             role="menuitem"
                             onClick={() => addOpponent('ai')}
-                            disabled={!hasKey}
+                            disabled={!hasKey || keyStatus === 'checking'}
                           >
                             <strong>AI opponent · Premium</strong>
                             <span>{hasKey ? 'Thinks with Claude using your key' : 'Add your API key below first'}</span>
@@ -295,9 +310,15 @@ export default function RoomWaiting({ session, onLeave }) {
               </div>
 
               {hasKey ? (
-                <div className="premium-ai-status">
-                  <span className="status-dot" />
-                  <span>Key held in this tab's memory only{hasAiSeat ? ', AI opponents are ready' : ', add an AI opponent to a seat'}</span>
+                <div className={`premium-ai-status premium-ai-status--${keyStatus}`} aria-live="polite">
+                  <span className={`status-dot ${keyStatus === 'unreachable' ? 'status-dot--offline' : ''}`} />
+                  <span>
+                    {keyStatus === 'checking'
+                      ? 'Checking your key with Anthropic'
+                      : keyStatus === 'unreachable'
+                        ? 'Could not reach Anthropic to check the key, AI opponents use the computer strategy if a call fails'
+                        : `Key verified and held in this tab's memory only${hasAiSeat ? ', AI opponents are ready' : ', add an AI opponent to a seat'}`}
+                  </span>
                   <button type="button" className="text-link" onClick={forgetKey}>
                     Forget key
                   </button>
@@ -324,6 +345,11 @@ export default function RoomWaiting({ session, onLeave }) {
                   <GoldButton variant="ghost" onClick={applyKey} disabled={!hasDraft}>
                     Use key
                   </GoldButton>
+                  {keyStatus === 'invalid' && (
+                    <p className="premium-ai-error" role="alert">
+                      Anthropic rejected that key, check it in the Claude Console and try again
+                    </p>
+                  )}
                 </div>
               )}
             </div>

@@ -1,16 +1,3 @@
-/* District colour families, shared with the landing page guide */
-
-:root {
-  --color-maroon: #7a3348;
-  --color-peacock: #6fa6cf;
-  --color-rose: #d24c80;
-  --color-saffron: #e8912d;
-  --color-kumkum: #c4353a;
-  --color-turmeric: #e3b022;
-  --color-emerald: #2f8f5b;
-  --color-indigo: #2f4c94;
-}
-
 .board-game-page {
   min-height: 100vh;
   padding: 0 0 32px;
@@ -1173,28 +1160,6 @@
   opacity: 0.45;
 }
 
-/* Seat colours tint every piece through currentColor */
-
-.seat-lamp {
-  --seat: #3d9e7a;
-  color: #3d9e7a;
-}
-
-.seat-temple {
-  --seat: #b43d36;
-  color: #b43d36;
-}
-
-.seat-elephant {
-  --seat: #c98c2e;
-  color: #c98c2e;
-}
-
-.seat-bell {
-  --seat: #5580b0;
-  color: #5580b0;
-}
-
 .piece-mark--token path {
   fill: currentColor;
   stroke: none;
@@ -1798,5 +1763,117 @@
 
   .auction-actions {
     grid-template-columns: 1fr;
+  }
+}
+
+/* Kaidi Kottai choices and the build shortcut */
+
+.detention-panel {
+  display: grid;
+  gap: 10px;
+  margin-top: 12px;
+  padding: 14px;
+  background: #f6efe6;
+  border-radius: 16px;
+  animation: rise 0.4s var(--ease-out) backwards;
+}
+
+.detention-panel p {
+  color: #6b4a1f;
+  font-size: 0.82rem;
+  line-height: 1.45;
+}
+
+.detention-actions {
+  display: grid;
+  grid-template-columns: 1fr 1fr;
+  gap: 8px;
+}
+
+.build-prompt {
+  margin-top: 14px;
+  padding: 14px;
+  background: var(--sage-50);
+  border-radius: 16px;
+  box-shadow: inset 0 0 0 1px var(--sage-200);
+  animation: rise 0.4s var(--ease-out) backwards;
+}
+
+.build-prompt .eyebrow {
+  margin-bottom: 8px;
+}
+
+.build-prompt-list {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 6px;
+}
+
+.build-chip {
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
+  padding: 6px 12px 6px 8px;
+  color: var(--ink);
+  background: var(--surface);
+  border: 1px solid var(--hairline);
+  border-radius: var(--radius-pill);
+  cursor: pointer;
+  font-size: 0.8rem;
+  font-weight: 600;
+  transition: border-color 0.3s var(--ease), transform 0.3s var(--ease);
+}
+
+.build-chip span {
+  width: 12px;
+  height: 12px;
+  background: var(--family);
+  border-radius: 4px;
+}
+
+.build-chip:hover {
+  border-color: var(--family);
+  transform: translateY(-1px);
+}
+
+/* Houses and hotels ride inside the owner badge, never over the name */
+.space-owner .space-builds {
+  display: inline-flex;
+  flex: 0 0 auto;
+  align-items: center;
+  gap: 1px;
+  margin-left: auto;
+  padding: 0 3px;
+  color: var(--seat);
+  background: #ffffff;
+  border-radius: 4px;
+  font-size: inherit;
+  font-weight: 800;
+  line-height: 1.3;
+}
+
+.space-owner .space-builds svg {
+  width: 1em;
+  height: 1em;
+  fill: currentColor;
+}
+
+.space-owner .space-builds--hotel {
+  color: #ffffff;
+  background: #1d1d1f;
+}
+
+@media (max-width: 620px) {
+  .board-topbar .volume-slider,
+  .board-topbar .room-code-pill {
+    display: none;
+  }
+
+  .board-topbar .lobby-back {
+    white-space: nowrap;
+  }
+
+  .board-topbar-actions {
+    gap: 8px;
   }
 }

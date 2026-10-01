@@ -3,6 +3,7 @@ import goodTimesMusic from '../assets/music/The Good Times.mp3';
 
 export default function AmbientMusic({
   isPlaying,
+  volume = 0.7,
   onPlaybackBlocked,
 }) {
   const audioReference = useRef(null);
@@ -15,7 +16,6 @@ export default function AmbientMusic({
     }
 
     audio.loop = true;
-    audio.volume = 0.28;
 
     if (isPlaying) {
       audio.play().catch(() => {
@@ -27,6 +27,13 @@ export default function AmbientMusic({
 
     return undefined;
   }, [isPlaying, onPlaybackBlocked]);
+
+  // Music sits a little under the game sounds at every level.
+  useEffect(() => {
+    if (audioReference.current) {
+      audioReference.current.volume = Math.min(1, Math.max(0, volume * 0.45));
+    }
+  }, [volume]);
 
   useEffect(() => {
     const audio = audioReference.current;

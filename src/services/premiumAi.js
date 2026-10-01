@@ -63,6 +63,22 @@ const getClient = () => {
   return client;
 };
 
+// Checks the key with Anthropic through the free models endpoint, so a typo
+// shows up in the waiting room rather than mid match.
+// Resolves to 'valid', 'invalid' or 'unreachable'.
+export const verifyPremiumKey = async () => {
+  try {
+    await getClient().models.list({ limit: 1 });
+    return 'valid';
+  } catch (error) {
+    if (error instanceof Anthropic.AuthenticationError || error instanceof Anthropic.PermissionDeniedError) {
+      return 'invalid';
+    }
+
+    return 'unreachable';
+  }
+};
+
 const SYSTEM_PROMPT = `You are a shrewd but good natured opponent in Manapally, a South Indian property strategy board game.
 Players buy districts, express routes and utilities, collect rent, and build houses and a hotel once they own a full colour family.
 The winner is the player with the highest total net worth (cash plus property value) when the turn limit is reached or when everyone else is bankrupt.

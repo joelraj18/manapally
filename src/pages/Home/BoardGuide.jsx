@@ -1,6 +1,7 @@
 import Carousel from '../../components/Carousel';
 import Icon from '../../components/Icon';
 import { routeDetails, utilityDetails } from '../Game/estate';
+import { DETENTION_FINE, TAXES } from '../Game/gameEngine';
 import { START_REWARD } from '../Game/matchRules';
 
 const rupees = (amount) => `₹${amount.toLocaleString('en-IN')}`;
@@ -57,7 +58,14 @@ const guide = [
     tone: 'fort',
     title: 'Kaidi Kottai',
     kicker: 'The fort prison',
-    text: 'Usually you are just visiting, but three doubles in a row or the wrong card will send you there',
+    text: `Usually you are just visiting, but three doubles in one turn or the wrong card lock you in until you pay ${rupees(DETENTION_FINE)}, use a pardon or roll doubles`,
+  },
+  {
+    icon: 'rupee',
+    tone: 'tax',
+    title: 'Royal taxes',
+    kicker: 'Kandayam and Vajra Tax',
+    text: `Kandayam collects ${rupees(TAXES[4])} and Vajra Tax ${rupees(TAXES[38])} for the royal treasury`,
   },
   {
     icon: 'leaf',
