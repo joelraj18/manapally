@@ -1,4 +1,5 @@
 import { useMemo, useState } from 'react';
+import BrandLogo from '../../components/BrandLogo';
 import GoldButton from '../../components/GoldButton';
 import { PIECES, PIECE_ORDER, PieceMark } from '../Game/pieces.jsx';
 import './lobby.css';
@@ -21,12 +22,20 @@ const createRoomCode = () =>
       ],
   ).join('');
 
-export default function Lobby({ onBack, onStartGame }) {
+const nextSteps = [
+  'Choose a display name and a royal piece',
+  'Create a room to receive your invitation code',
+  'Pick a table of 2, 3 or 4 seats and start, AI opponents fill any open seat',
+];
+
+export default function Lobby({ onBack, onStartGame, initialPiece = 'lamp' }) {
   const [displayName, setDisplayName] = useState('');
   const [roomCode, setRoomCode] = useState('');
   const [createdRoomCode, setCreatedRoomCode] = useState('');
   const [isWaitingRoom, setIsWaitingRoom] = useState(false);
-  const [selectedToken, setSelectedToken] = useState('lamp');
+  const [selectedToken, setSelectedToken] = useState(
+    PIECES[initialPiece] ? initialPiece : 'lamp',
+  );
   const [message, setMessage] = useState('');
 
   const selectedPlayer = useMemo(
@@ -44,7 +53,7 @@ export default function Lobby({ onBack, onStartGame }) {
 
   const createRoom = () => {
     if (displayName.trim().length < 2) {
-      showMessage('Please enter a display name with at least 2 letters.');
+      showMessage('Please enter a display name with at least 2 letters');
       return;
     }
 
@@ -53,7 +62,7 @@ export default function Lobby({ onBack, onStartGame }) {
     setRoomCode(newRoomCode);
     setCreatedRoomCode(newRoomCode);
     setIsWaitingRoom(true);
-    showMessage('Your private table is ready.');
+    showMessage('Your private table is ready');
   };
 
   const copyInviteCode = async () => {
@@ -63,7 +72,7 @@ export default function Lobby({ onBack, onStartGame }) {
 
     try {
       await navigator.clipboard.writeText(createdRoomCode);
-      showMessage('Invite code copied to your clipboard.');
+      showMessage('Invitation code copied');
     } catch {
       showMessage(`Copy this code: ${createdRoomCode}`);
     }
@@ -71,11 +80,11 @@ export default function Lobby({ onBack, onStartGame }) {
 
   const joinRoom = () => {
     if (roomCode.trim().length !== 6) {
-      showMessage('Enter the 6-character room code from your host.');
+      showMessage('Enter the 6 character room code from your host');
       return;
     }
 
-    showMessage('Connecting to this room will be enabled soon.');
+    showMessage('Joining by code is coming soon, create a room to play now');
   };
 
   if (isWaitingRoom) {
@@ -93,13 +102,12 @@ export default function Lobby({ onBack, onStartGame }) {
   return (
     <main className="lobby-page">
       <div className="lobby-topbar">
-        <button className="lobby-brand" type="button" onClick={onBack}>
-          <span className="brand-mark">M</span>
-          <span>MANAPALLY</span>
+        <button className="lobby-brand" type="button" onClick={onBack} aria-label="Manapally home">
+          <BrandLogo size={22} />
         </button>
 
         <button className="lobby-back" type="button" onClick={onBack}>
-          ← Return home
+          <span aria-hidden="true">‹</span> Home
         </button>
       </div>
 
@@ -110,23 +118,32 @@ export default function Lobby({ onBack, onStartGame }) {
           <h1>
             Gather your
             <br />
-            <em>inner circle.</em>
+            <em>inner circle</em>
           </h1>
 
           <p>
-            Choose your royal piece, create a private table, and send
-            the invitation to your friends.
+            Choose your royal piece, open a private table and share the
+            invitation with the people you play with
           </p>
+
+          <ol className="lobby-steps">
+            {nextSteps.map((step, index) => (
+              <li key={step}>
+                <span>{index + 1}</span>
+                {step}
+              </li>
+            ))}
+          </ol>
 
           <div className="lobby-status">
             <span className="status-dot" />
-            Private online rooms · 2–4 players
+            Private rooms for 2 to 4 players
           </div>
         </div>
 
         <div className="lobby-panel">
           <div className="lobby-panel-heading">
-            <span className="panel-number">I</span>
+            <span className="panel-number">1</span>
 
             <div>
               <p className="eyebrow">Your identity</p>
@@ -151,7 +168,7 @@ export default function Lobby({ onBack, onStartGame }) {
           <div className="token-heading">
             <div>
               <p className="field-label">Choose your piece</p>
-              <span>Reserved for this game</span>
+              <span>Every piece plays by the same rules</span>
             </div>
 
             <span className="selected-token-name">
@@ -179,9 +196,7 @@ export default function Lobby({ onBack, onStartGame }) {
             ))}
           </div>
 
-          <GoldButton icon="✦" onClick={createRoom}>
-            Create a private room
-          </GoldButton>
+          <GoldButton onClick={createRoom}>Create a private room</GoldButton>
 
           {createdRoomCode && (
             <div className="room-created-panel">
@@ -196,7 +211,6 @@ export default function Lobby({ onBack, onStartGame }) {
               <GoldButton
                 variant="ghost"
                 size="small"
-                icon="⧉"
                 onClick={copyInviteCode}
               >
                 Copy
@@ -214,7 +228,8 @@ export default function Lobby({ onBack, onStartGame }) {
               type="text"
               value={roomCode}
               maxLength="6"
-              placeholder="ROOM CODE"
+              aria-label="Room code"
+              placeholder="Room code"
               onChange={(event) =>
                 setRoomCode(
                   event.target.value

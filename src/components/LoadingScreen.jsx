@@ -1,4 +1,5 @@
 import { useEffect, useState } from 'react';
+import { BrandMark } from './BrandLogo';
 
 export default function LoadingScreen({ onComplete }) {
   const [progress, setProgress] = useState(0);
@@ -11,7 +12,7 @@ export default function LoadingScreen({ onComplete }) {
 
           window.setTimeout(() => {
             onComplete();
-          }, 220);
+          }, 260);
 
           return 100;
         }
@@ -26,10 +27,8 @@ export default function LoadingScreen({ onComplete }) {
   }, [onComplete]);
 
   return (
-    <div className="loading-screen">
-      <div className="loading-monogram">M</div>
-
-      <p>PREPARING THE COURT</p>
+    <div className={`loading-screen ${progress >= 100 ? 'loading-screen--done' : ''}`}>
+      <BrandMark size={72} className="loading-mark" />
 
       <div
         className="loading-track"
@@ -39,10 +38,8 @@ export default function LoadingScreen({ onComplete }) {
         aria-valuemax="100"
         aria-valuenow={progress}
       >
-        <span style={{ width: `${progress}%` }} />
+        <span style={{ transform: `scaleX(${progress / 100})` }} />
       </div>
-
-      <small>{progress}%</small>
     </div>
   );
 }
