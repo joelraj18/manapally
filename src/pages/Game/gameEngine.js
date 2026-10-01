@@ -101,6 +101,7 @@ export const createInitialState = (players) => {
     drawnCard: null,
     purchaseOffer: null,
     auction: null,
+    endVote: null, // { proposerId, agreed: [ids], passed }
     gameOver: null,
     sfx: null,
   };
@@ -275,6 +276,11 @@ export default class GameEngine {
       return;
     }
 
+    if (this.state.endVote?.passed) {
+      this.finish('agreed');
+      return;
+    }
+
     const active = this.activePlayer;
 
     if (active.kind === 'bot' || active.kind === 'ai') {
@@ -407,7 +413,8 @@ export default class GameEngine {
           !isDouble ||
           this.isDetained(playerId) ||
           !this.isAlive(playerId) ||
-          this.state.gameOver
+          this.state.gameOver ||
+          this.state.endVote?.passed
         ) {
           break;
         }
@@ -528,6 +535,12 @@ export default class GameEngine {
     const turnCount = this.state.turnCount + 1;
     const alive = this.alivePlayers();
 
+    if (this.state.endVote?.passed) {
+      this.set({ turnCount });
+      this.finish('agreed');
+      return;
+    }
+
     if (alive.length <= 1) {
       this.set({ turnCount });
       this.finish('bankruptcy');
@@ -551,6 +564,10 @@ export default class GameEngine {
   }
 
   finish(reason) {
+    if (this.state.gameOver) {
+      return;
+    }
+
     const standings = computeStandings(this.state);
     const top = standings[0]?.netWorth ?? 0;
     const winners = standings
@@ -558,7 +575,8 @@ export default class GameEngine {
       .map((entry) => entry.id);
 
     this.set({
-      gameOver: { reason, standings, winners },
+      gameOver: { reason, standings, winners, turns: this.state.turnCount },
+      endVote: null,
       purchaseOffer: null,
       auction: null,
       drawnCard: null,
@@ -569,7 +587,9 @@ export default class GameEngine {
       activity:
         reason === 'bankruptcy'
           ? `${winnerNames} is the last player standing`
-          : `Match complete after ${TOTAL_MATCH_TURNS} turns\n${winnerNames} ${winners.length > 1 ? 'share' : 'takes'} the crown`,
+          : reason === 'agreed'
+            ? `The table agreed to end the game after ${this.state.turnCount} turns\n${winnerNames} ${winners.length > 1 ? 'share' : 'takes'} the crown`
+            : `Match complete after ${TOTAL_MATCH_TURNS} turns\n${winnerNames} ${winners.length > 1 ? 'share' : 'takes'} the crown`,
     });
     this.chat(`Match over, ${winnerNames} ${winners.length > 1 ? 'share the win' : 'wins'} with ${formatRupees(top)} net worth`);
     this.sound('winner');
@@ -1168,6 +1188,8 @@ export default class GameEngine {
     if (this.pendingPurchase?.playerId === playerId) {
       this.pendingPurchase.resolve(false);
     }
+
+    this.checkEndVote();
   }
 
   // Owner actions from the property sheet. Each returns true when applied.
@@ -1241,6 +1263,74 @@ export default class GameEngine {
     }
   }
 
+  // ------------------------------------------------------------ end vote
+
+  // Everyone still playing who is a person gets a vote; computer and AI
+  // opponents always go along with the table.
+  voters() {
+    return this.alivePlayers().filter((player) => player.kind === 'human');
+  }
+
+  proposeEnd(playerId) {
+    const player = this.player(playerId);
+
+    if (!player || player.kind !== 'human' || !this.isAlive(playerId) || this.state.gameOver || this.state.endVote) {
+      return false;
+    }
+
+    this.set({ endVote: { proposerId: playerId, agreed: [playerId], passed: false } });
+
+    if (this.voters().length > 1) {
+      this.chat(`${player.name} proposed ending the game, everyone must agree`);
+    }
+
+    this.checkEndVote();
+    return true;
+  }
+
+  voteEnd(playerId, agree) {
+    const vote = this.state.endVote;
+
+    if (!vote || vote.passed || !this.voters().some((player) => player.id === playerId)) {
+      return false;
+    }
+
+    if (!agree) {
+      this.set({ endVote: null });
+      this.chat(`${this.nameOf(playerId)} wants to keep playing, the game goes on`);
+      return true;
+    }
+
+    if (!vote.agreed.includes(playerId)) {
+      this.set({ endVote: { ...vote, agreed: [...vote.agreed, playerId] } });
+    }
+
+    this.checkEndVote();
+    return true;
+  }
+
+  checkEndVote() {
+    const vote = this.state.endVote;
+
+    if (!vote || vote.passed || this.state.gameOver) {
+      return;
+    }
+
+    const voters = this.voters();
+
+    if (!voters.every((player) => vote.agreed.includes(player.id))) {
+      return;
+    }
+
+    this.set({ endVote: { ...vote, passed: true } });
+
+    if (this.state.busy) {
+      this.chat('Everyone agreed, the game ends when this turn is over');
+    } else {
+      this.finish('agreed');
+    }
+  }
+
   // A remote player left mid match: a computer opponent takes the seat.
   replaceWithBot(playerId) {
     const player = this.player(playerId);
@@ -1260,7 +1350,9 @@ export default class GameEngine {
       this.pendingPurchase.resolve(false);
     }
 
-    if (!this.state.busy) {
+    this.checkEndVote();
+
+    if (!this.state.busy && !this.state.gameOver) {
       this.schedule();
     }
   }

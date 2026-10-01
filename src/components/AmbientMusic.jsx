@@ -28,10 +28,11 @@ export default function AmbientMusic({
     return undefined;
   }, [isPlaying, onPlaybackBlocked]);
 
-  // Music sits a little under the game sounds at every level.
+  // The music slider maps onto a gentler range so full volume never drowns
+  // out the game sounds.
   useEffect(() => {
     if (audioReference.current) {
-      audioReference.current.volume = Math.min(1, Math.max(0, volume * 0.45));
+      audioReference.current.volume = Math.min(1, Math.max(0, volume * 0.6));
     }
   }, [volume]);
 

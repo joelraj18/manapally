@@ -29,16 +29,30 @@ const BoardGame = lazy(() => import('./pages/Game/BoardGame'));
 const clearPremiumKey = () =>
   import('./services/premiumAi').then((module) => module.clearPremiumKey());
 
+// Music and sound effects are separate channels. Volumes and the effects
+// switch are remembered on this device; music always starts off because
+// browsers block sound that plays before the first tap.
+const AUDIO_KEY = 'manapally-audio';
+const DEFAULT_AUDIO = { musicOn: false, musicVolume: 0.5, effectsOn: true, effectsVolume: 0.8 };
+
+const loadAudio = () => {
+  try {
+    const saved = JSON.parse(window.localStorage.getItem(AUDIO_KEY) || '{}');
+    const level = (value, fallback) => (value > 0 && value <= 1 ? value : fallback);
+
+    return {
+      musicOn: false,
+      musicVolume: level(saved.musicVolume, DEFAULT_AUDIO.musicVolume),
+      effectsOn: typeof saved.effectsOn === 'boolean' ? saved.effectsOn : DEFAULT_AUDIO.effectsOn,
+      effectsVolume: level(saved.effectsVolume, DEFAULT_AUDIO.effectsVolume),
+    };
+  } catch {
+    return DEFAULT_AUDIO;
+  }
+};
+
 export default function Game() {
-  const [isMusicEnabled, setIsMusicEnabled] = useState(false);
-  const [volume, setVolume] = useState(() => {
-    try {
-      const saved = Number(window.localStorage.getItem('manapally-volume'));
-      return saved > 0 && saved <= 1 ? saved : 0.7;
-    } catch {
-      return 0.7;
-    }
-  });
+  const [audio, setAudio] = useState(loadAudio);
   const [currentView, setCurrentView] = useState('home');
   const [lobbyPiece, setLobbyPiece] = useState('lamp');
   const [session, setSession] = useState(null);
@@ -120,32 +134,27 @@ export default function Game() {
     setCurrentView('lobby');
   };
 
-  // One switch for everything audible: music and every game sound.
-  const handleMusicToggle = () => {
-    setIsMusicEnabled((isEnabled) => !isEnabled);
-  };
-
-  // The slider level is remembered on this device; dragging it unmutes, and
-  // dragging it to zero mutes.
-  const handleVolume = (next) => {
-    if (next > 0) {
-      setVolume(next);
-      setIsMusicEnabled(true);
+  const updateAudio = useCallback((patch) => {
+    setAudio((current) => {
+      const next = { ...current, ...patch };
 
       try {
-        window.localStorage.setItem('manapally-volume', String(next));
+        const { musicVolume, effectsOn, effectsVolume } = next;
+        window.localStorage.setItem(AUDIO_KEY, JSON.stringify({ musicVolume, effectsOn, effectsVolume }));
       } catch {
-        // Storage can be unavailable in private windows; the level still applies.
+        // Storage can be unavailable in private windows; the settings still apply.
       }
-    } else {
-      setIsMusicEnabled(false);
-    }
-  };
+
+      return next;
+    });
+  }, []);
+
+  const toggleMusic = () => updateAudio({ musicOn: !audio.musicOn });
 
   const handlePlaybackBlocked = useCallback(() => {
-    setIsMusicEnabled(false);
+    updateAudio({ musicOn: false });
     showNotice('Music could not start, please tap the speaker button again');
-  }, [showNotice]);
+  }, [showNotice, updateAudio]);
 
   let view;
 
@@ -156,10 +165,8 @@ export default function Game() {
         players={match.players}
         myPlayerId={match.myPlayerId}
         session={session}
-        soundEnabled={isMusicEnabled}
-        volume={volume}
-        onVolume={handleVolume}
-        onMusicToggle={handleMusicToggle}
+        audio={audio}
+        onAudio={updateAudio}
         onExit={leaveRoom}
         onRestart={() => session.restartGame()}
       />
@@ -183,7 +190,7 @@ export default function Game() {
 
   return (
     <>
-      <AmbientMusic isPlaying={isMusicEnabled} volume={volume} onPlaybackBlocked={handlePlaybackBlocked} />
+      <AmbientMusic isPlaying={audio.musicOn} volume={audio.musicVolume} onPlaybackBlocked={handlePlaybackBlocked} />
 
       <Suspense fallback={<LoadingScreen onComplete={() => {}} />}>{view}</Suspense>
 
@@ -197,10 +204,8 @@ export default function Game() {
   return (
     <main className="game-shell" ref={homeRef}>
       <Navbar
-        musicEnabled={isMusicEnabled}
-        volume={volume}
-        onVolume={handleVolume}
-        onMusicToggle={handleMusicToggle}
+        audio={audio}
+        onAudio={updateAudio}
         onNavigate={scrollToSection}
         onPlay={() => openLobby()}
       />
@@ -235,8 +240,8 @@ export default function Game() {
       <Footer
         onNavigate={scrollToSection}
         onPlay={() => openLobby()}
-        onMusicToggle={handleMusicToggle}
-        musicEnabled={isMusicEnabled}
+        onMusicToggle={toggleMusic}
+        musicEnabled={audio.musicOn}
       />
     </main>
   );

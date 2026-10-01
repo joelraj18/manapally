@@ -2,7 +2,7 @@ import { useCallback, useEffect, useMemo, useRef, useState } from 'react';
 import AnimatedBalance from '../../components/AnimatedBalance';
 import BrandLogo, { BrandMark } from '../../components/BrandLogo';
 import ChatPanel from '../../components/ChatPanel';
-import VolumeControl from '../../components/VolumeControl';
+import SoundMixer from '../../components/SoundMixer';
 import GoldButton from '../../components/GoldButton';
 import { premiumAdvisor } from '../../services/premiumAi';
 import { BOARD_GRID, BOARD_SPACES } from './boardData';
@@ -106,10 +106,8 @@ export default function BoardGame({
   players: seatPlayers,
   myPlayerId,
   session,
-  soundEnabled = false,
-  volume = 0.7,
-  onVolume,
-  onMusicToggle,
+  audio: audioSettings = { musicOn: false, musicVolume: 0.5, effectsOn: true, effectsVolume: 0.8 },
+  onAudio,
   onExit,
   onRestart,
 }) {
@@ -174,6 +172,12 @@ export default function BoardGame({
         case 'manage':
           engine.manageProperty(player.id, Number(action.spaceId), action.action);
           break;
+        case 'end-propose':
+          engine.proposeEnd(player.id);
+          break;
+        case 'end-vote':
+          engine.voteEnd(player.id, Boolean(action.agree));
+          break;
         default:
           break;
       }
@@ -232,6 +236,12 @@ export default function BoardGame({
         case 'manage':
           engine.manageProperty(myPlayerId, action.spaceId, action.action);
           break;
+        case 'end-propose':
+          engine.proposeEnd(myPlayerId);
+          break;
+        case 'end-vote':
+          engine.voteEnd(myPlayerId, Boolean(action.agree));
+          break;
         default:
           break;
       }
@@ -241,10 +251,11 @@ export default function BoardGame({
 
   // -------------------------------------------------------------- sound
 
-  // Every effect sound goes through this gate, so the speaker button in the
-  // top bar silences buying, express, coronation and winner sounds as well as
-  // the music.
-  const soundOnRef = useRef(soundEnabled);
+  // Every effect sound goes through this gate, so the sound effects switch
+  // silences buying, express, coronation and winner sounds while the music
+  // keeps its own switch.
+  const effectsOn = audioSettings.effectsOn && audioSettings.effectsVolume > 0;
+  const soundOnRef = useRef(effectsOn);
   const audioRef = useRef(null);
 
   if (!audioRef.current) {
@@ -259,17 +270,17 @@ export default function BoardGame({
 
   useEffect(() => {
     Object.values(audioRef.current).forEach((audio) => {
-      audio.volume = Math.min(1, Math.max(0, volume));
+      audio.volume = Math.min(1, Math.max(0, audioSettings.effectsVolume));
     });
-  }, [volume]);
+  }, [audioSettings.effectsVolume]);
 
   useEffect(() => {
-    soundOnRef.current = soundEnabled;
+    soundOnRef.current = effectsOn;
 
-    if (!soundEnabled) {
+    if (!effectsOn) {
       Object.values(audioRef.current).forEach((audio) => audio.pause());
     }
-  }, [soundEnabled]);
+  }, [effectsOn]);
 
   useEffect(() => {
     const audios = audioRef.current;
@@ -321,6 +332,13 @@ export default function BoardGame({
   const amAlive = me && !state.bankrupt[me.id];
   const isMyTurn = activePlayer?.id === myPlayerId;
   const canRoll = isMyTurn && amAlive && !state.busy && !state.gameOver;
+  // Ending by agreement: every person still playing votes, computers follow.
+  const voters = players.filter((player) => player.kind === 'human' && !state.bankrupt[player.id]);
+  const endVote = state.endVote;
+  const iAmVoter = voters.some((player) => player.id === myPlayerId);
+  const canProposeEnd = iAmVoter && !state.gameOver && !endVote;
+  const waitingOn = endVote ? voters.filter((player) => !endVote.agreed.includes(player.id)) : [];
+  const mustVote = endVote && !endVote.passed && iAmVoter && !endVote.agreed.includes(myPlayerId);
   const detainedFor = (id) => state.detained?.[id];
   const isDetained = (id) => detainedFor(id) !== null && detainedFor(id) !== undefined;
   const myDetention = isDetained(myPlayerId);
@@ -721,7 +739,9 @@ export default function BoardGame({
             <p className="property-card-kicker">
               {over.reason === 'bankruptcy'
                 ? 'Last player standing'
-                : `Match complete after ${TOTAL_MATCH_TURNS} turns`}
+                : over.reason === 'agreed'
+                  ? `Ended by agreement after ${over.turns ?? state.turnCount} turns`
+                  : `Match complete after ${TOTAL_MATCH_TURNS} turns`}
             </p>
             <h3 id="results-title">{headline}</h3>
             <p className="results-sub">Ranked by total net worth, cash plus the value of every property held</p>
@@ -806,14 +826,11 @@ export default function BoardGame({
               {session.code}
             </span>
           )}
-          {onMusicToggle && (
-            <VolumeControl
-              enabled={soundEnabled}
-              volume={volume}
-              onToggle={onMusicToggle}
-              onVolume={onVolume || (() => {})}
-              buttonClassName="music-toggle-button"
-            />
+          {onAudio && <SoundMixer audio={audioSettings} onAudio={onAudio} />}
+          {canProposeEnd && (
+            <button className="end-game-button" type="button" onClick={() => setSheet('end')}>
+              End game
+            </button>
           )}
           <button className="lobby-back" type="button" onClick={onExit}>
             Exit game
@@ -1047,6 +1064,86 @@ export default function BoardGame({
             </div>
           )}
 
+          {sheet === 'end' && canProposeEnd && (
+            <div className="property-card-overlay end-overlay" onClick={() => setSheet(null)}>
+              <div
+                className="property-card end-sheet"
+                onClick={(event) => event.stopPropagation()}
+                role="dialog"
+                aria-labelledby="end-title"
+              >
+                <header className="property-card-header">
+                  <p className="property-card-kicker">End the match early</p>
+                  <h3 id="end-title">End the game for everyone?</h3>
+                  <button type="button" className="property-card-close" onClick={() => setSheet(null)} aria-label="Close">
+                    ✕
+                  </button>
+                </header>
+                <div className="property-card-body">
+                  <p className="end-sheet-text">
+                    {voters.length > 1
+                      ? `Every player at the table must agree, ${voters
+                          .filter((player) => player.id !== myPlayerId)
+                          .map((player) => player.name)
+                          .join(' and ')} will be asked`
+                      : 'You are the only person at the table, the game ends as soon as you confirm'}
+                  </p>
+                  <p className="end-sheet-text">
+                    The crown goes to the highest total net worth right now, cash plus every property held
+                  </p>
+                  <div className="purchase-offer-actions">
+                    <GoldButton
+                      onClick={() => {
+                        act({ type: 'end-propose' });
+                        setSheet(null);
+                      }}
+                    >
+                      {voters.length > 1 ? 'Ask the table' : 'End game'}
+                    </GoldButton>
+                    <GoldButton variant="ghost" onClick={() => setSheet(null)}>
+                      Keep playing
+                    </GoldButton>
+                  </div>
+                </div>
+              </div>
+            </div>
+          )}
+
+          {mustVote && (
+            <div className="property-card-overlay end-overlay">
+              <div className="property-card end-sheet" role="dialog" aria-labelledby="vote-title">
+                <header className="property-card-header">
+                  <p className="property-card-kicker">A vote at the table</p>
+                  <h3 id="vote-title">
+                    {players.find((player) => player.id === endVote.proposerId)?.name} wants to end the game
+                  </h3>
+                </header>
+                <div className="property-card-body">
+                  <p className="end-sheet-text">
+                    If everyone agrees the match ends now and the crown goes to the highest total net worth
+                  </p>
+                  <ol className="end-vote-list">
+                    {voters.map((player) => (
+                      <li key={player.id} className={endVote.agreed.includes(player.id) ? 'is-agreed' : ''}>
+                        <span className={`seat-${player.pieceKey}`}>
+                          <PieceMark piece={player.pieceKey} variant="token" />
+                        </span>
+                        {player.id === myPlayerId ? 'You' : player.name}
+                        <em>{endVote.agreed.includes(player.id) ? 'Agreed' : 'Deciding'}</em>
+                      </li>
+                    ))}
+                  </ol>
+                  <div className="purchase-offer-actions">
+                    <GoldButton onClick={() => act({ type: 'end-vote', agree: true })}>Agree to end</GoldButton>
+                    <GoldButton variant="ghost" onClick={() => act({ type: 'end-vote', agree: false })}>
+                      Keep playing
+                    </GoldButton>
+                  </div>
+                </div>
+              </div>
+            </div>
+          )}
+
           {sheet === 'match' && (
             <div className="property-card-overlay" onClick={() => setSheet(null)}>
               <div className="property-card match-info-modal" onClick={(event) => event.stopPropagation()} role="dialog" aria-labelledby="match-info-title">
@@ -1062,10 +1159,11 @@ export default function BoardGame({
                     The richest estate wins, measured by total net worth when the match ends
                   </p>
                   <div className="property-card-section">
-                    <h4>Two ways to finish</h4>
+                    <h4>Three ways to finish</h4>
                     <ul className="dice-probability-list">
                       <li>All {TOTAL_MATCH_TURNS} turns shared by the table have been played</li>
                       <li>Every player except one has gone bankrupt</li>
+                      <li>Everyone at the table agrees to end the game with End game</li>
                     </ul>
                   </div>
                   <div className="property-card-section">
@@ -1174,6 +1272,22 @@ export default function BoardGame({
                     : 'Roll the dice'
                   : `Waiting for ${activePlayer.name}`}
           </GoldButton>
+
+          {endVote && !state.gameOver && !mustVote && (
+            <div className={`end-vote-status ${endVote.passed ? 'end-vote-status--passed' : ''}`} aria-live="polite">
+              <p className="eyebrow">{endVote.passed ? 'Game ending' : 'Vote to end the game'}</p>
+              <p>
+                {endVote.passed
+                  ? 'Everyone agreed, the final standings appear when this turn is over'
+                  : `Waiting for ${waitingOn.map((player) => player.name).join(' and ')} to agree`}
+              </p>
+              {!endVote.passed && iAmVoter && (
+                <button type="button" className="text-link" onClick={() => act({ type: 'end-vote', agree: false })}>
+                  Cancel the vote
+                </button>
+              )}
+            </div>
+          )}
 
           {myDetention && amAlive && !state.gameOver && (
             <div className="detention-panel">

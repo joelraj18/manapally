@@ -1,7 +1,7 @@
 import { useEffect, useState } from 'react';
 import BrandLogo, { BrandMark } from './BrandLogo';
 import GoldButton from './GoldButton';
-import VolumeControl from './VolumeControl';
+import SoundMixer from './SoundMixer';
 
 const sectionLinks = [
   { id: 'overview', label: 'Overview' },
@@ -12,7 +12,7 @@ const sectionLinks = [
   { id: 'faq', label: 'FAQ' },
 ];
 
-export default function Navbar({ musicEnabled, volume, onVolume, onMusicToggle, onNavigate, onPlay }) {
+export default function Navbar({ audio, onAudio, onNavigate, onPlay }) {
   const [isStuck, setIsStuck] = useState(false);
 
   // The local nav gains its frosted backdrop only after the global bar has
@@ -47,13 +47,7 @@ export default function Navbar({ musicEnabled, volume, onVolume, onMusicToggle, 
             ))}
           </nav>
 
-          <VolumeControl
-            className="global-nav-volume"
-            enabled={musicEnabled}
-            volume={volume}
-            onToggle={onMusicToggle}
-            onVolume={onVolume}
-          />
+          <SoundMixer audio={audio} onAudio={onAudio} />
         </div>
       </header>
 
