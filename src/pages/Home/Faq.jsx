@@ -8,11 +8,11 @@ const questions = [
   },
   {
     q: 'Can I play on my own?',
-    a: 'Yes, every open seat is filled by an AI opponent the moment you start the match, so a table is always ready',
+    a: 'Yes, add computer opponents to any open seat in your room, or premium AI opponents if you have a Claude API key',
   },
   {
     q: 'Can friends join my room?',
-    a: 'Your room already shows a six character invitation code, joining by code is arriving soon and until then matches are played against AI opponents',
+    a: 'Yes, share your six character room code and friends anywhere join from the lobby with Join room, then chat with the table while you play',
   },
   {
     q: 'How long does a match last?',
@@ -20,7 +20,7 @@ const questions = [
   },
   {
     q: 'How is the winner decided?',
-    a: `The player holding the most cash after turn ${TOTAL_MATCH_TURNS} wins, and players who finish level share the victory`,
+    a: `The highest total net worth wins, cash plus the value of every property held, when all ${TOTAL_MATCH_TURNS} turns are played or when every other player is bankrupt`,
   },
   {
     q: 'Can I play on my phone?',

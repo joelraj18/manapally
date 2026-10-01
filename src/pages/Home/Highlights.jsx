@@ -1,5 +1,5 @@
 import { TOTAL_MATCH_TURNS, START_REWARD } from '../Game/matchRules';
-import { BOARD_SPACES, STARTING_BALANCE } from '../Game/BoardGame';
+import { BOARD_SPACES, STARTING_BALANCE } from '../Game/boardData';
 import FeatureCard from '../../components/FeatureCard';
 import Icon from '../../components/Icon';
 

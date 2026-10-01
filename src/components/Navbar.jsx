@@ -77,7 +77,7 @@ export default function Navbar({ musicEnabled, onMusicToggle, onNavigate, onPlay
 
       <div className="ribbon">
         <p>
-          Play free right in your browser with up to 3 AI opponents{' '}
+          Play free in your browser with friends anywhere, or with computer opponents{' '}
           <button type="button" className="text-link" onClick={onPlay}>
             Create a room <span aria-hidden="true">›</span>
           </button>

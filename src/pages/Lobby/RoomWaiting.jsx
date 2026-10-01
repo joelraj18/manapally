@@ -1,58 +1,110 @@
-import React, { useState } from 'react';
+import { useEffect, useRef, useState } from 'react';
+import ApiKeyInfo from '../../components/ApiKeyInfo';
 import BrandLogo from '../../components/BrandLogo';
+import ChatPanel from '../../components/ChatPanel';
 import GoldButton from '../../components/GoldButton';
+import {
+  clearPremiumKey,
+  hasPremiumKey,
+  onPremiumKeyChange,
+  setPremiumKey,
+} from '../../services/premiumAi';
 import { TOTAL_MATCH_TURNS } from '../Game/matchRules';
 import { PIECES, PieceMark } from '../Game/pieces.jsx';
+import '../Game/board-game.css';
+import './lobby.css';
 import './room-waiting.css';
 
-export default function RoomWaiting({
-  roomCode,
-  hostName,
-  hostToken,
-  onBack,
-  onStartGame,
-}) {
-  const [playerCount, setPlayerCount] = useState(2);
+const seatRole = (seat, session) => {
+  if (seat.kind === 'bot') return 'Computer opponent';
+  if (seat.kind === 'ai') return 'AI opponent · Premium';
+  if (seat.clientId === 'host') return 'Host';
+  return 'Friend';
+};
+
+export default function RoomWaiting({ session, onLeave }) {
+  const [lobby, setLobby] = useState(session.lobby);
   const [copyState, setCopyState] = useState('idle');
+  const [hasKey, setHasKey] = useState(hasPremiumKey());
+  const [hasDraft, setHasDraft] = useState(false);
+  const [showKeyInfo, setShowKeyInfo] = useState(false);
+  const [openMenu, setOpenMenu] = useState(null);
+  const keyInputRef = useRef(null);
+  const isHost = session.isHost;
+
+  useEffect(() => session.on('lobby', (next) => setLobby({ ...next, seats: [...next.seats] })), [session]);
+  useEffect(() => onPremiumKeyChange(setHasKey), []);
+
+  // The add opponent menu closes on Escape or a click anywhere else.
+  useEffect(() => {
+    if (openMenu === null) {
+      return undefined;
+    }
+
+    const close = (event) => {
+      if (event.type === 'keydown' ? event.key === 'Escape' : !event.target.closest('.seat-add')) {
+        setOpenMenu(null);
+      }
+    };
+
+    document.addEventListener('keydown', close);
+    document.addEventListener('pointerdown', close);
+
+    return () => {
+      document.removeEventListener('keydown', close);
+      document.removeEventListener('pointerdown', close);
+    };
+  }, [openMenu]);
+
+  const seats = lobby.seats;
+  const openSeats = Math.max(0, lobby.tableSize - seats.length);
+  const hasAiSeat = seats.some((seat) => seat.kind === 'ai');
 
   const copyRoomCode = async () => {
     try {
-      await navigator.clipboard.writeText(roomCode);
+      await navigator.clipboard.writeText(session.code);
       setCopyState('copied');
     } catch {
-      // The room code remains visible if the browser blocks clipboard access.
       setCopyState('blocked');
     }
 
     window.setTimeout(() => setCopyState('idle'), 2200);
   };
 
-  const openSeats = Array.from({ length: playerCount - 1 }, (_, i) => i + 1);
-  const hostPieceConfig = PIECES[hostToken] || PIECES.lamp;
+  const addOpponent = (kind) => {
+    session.addOpponent(kind);
+    setOpenMenu(null);
+  };
 
-  const handleStart = () => {
-    if (onStartGame) {
-      onStartGame({
-        playerCount,
-        hostPiece: hostToken,
-        hostName: hostName || 'Host',
-      });
+  // The field is uncontrolled, so the key never enters React state. It goes
+  // straight into the premium AI module's memory and the field is wiped.
+  const applyKey = () => {
+    const input = keyInputRef.current;
+
+    if (input && setPremiumKey(input.value)) {
+      input.value = '';
+      setHasDraft(false);
     }
+  };
+
+  const forgetKey = () => {
+    clearPremiumKey();
+    seats.filter((seat) => seat.kind === 'ai').forEach((seat) => session.removeSeat(seat.seatId));
   };
 
   return (
     <main className="waiting-room-page">
       <header className="waiting-topbar">
-        <button className="lobby-brand" type="button" onClick={onBack} aria-label="Back to the lobby">
+        <button className="lobby-brand" type="button" onClick={onLeave} aria-label="Leave the room">
           <BrandLogo size={22} />
         </button>
 
         <div className="room-status">
-          <span className="status-dot" />
-          Private table
+          <span className={`status-dot ${session.status === 'offline' ? 'status-dot--offline' : ''}`} />
+          {session.status === 'offline' ? 'Offline table' : 'Private table online'}
         </div>
 
-        <button className="lobby-back" type="button" onClick={onBack}>
+        <button className="lobby-back" type="button" onClick={onLeave}>
           Leave room
         </button>
       </header>
@@ -62,29 +114,33 @@ export default function RoomWaiting({
           <p className="eyebrow">The private table</p>
 
           <h1>
-            The court
+            The Courts
             <br />
-            <em>awaits</em>
+            <em>Awaits</em>
           </h1>
 
           <p>
-            Share your invitation code with the players joining your
-            table, then begin whenever your circle is ready
+            {isHost
+              ? 'Share the room code with your friends, they join from the lobby with Join room and appear here as they arrive'
+              : 'You are seated, the host starts the game once the table is ready'}
           </p>
 
           <div className="invite-code-card">
-            <span>Your invitation code</span>
-
-            <strong>{roomCode}</strong>
-
+            <span>Room code</span>
+            <strong>{session.code}</strong>
             <button type="button" onClick={copyRoomCode} aria-live="polite">
-              {copyState === 'copied'
-                ? 'Copied'
-                : copyState === 'blocked'
-                  ? 'Copy blocked, share the code above'
-                  : 'Copy invitation'}
+              {copyState === 'copied' ? 'Copied' : copyState === 'blocked' ? 'Copy blocked, share the code above' : 'Copy room code'}
             </button>
           </div>
+
+          {session.status === 'offline' && (
+            <p className="offline-note">
+              The room service could not be reached, so friends cannot join right now, you can still play
+              with computer and AI opponents
+            </p>
+          )}
+
+          <ChatPanel session={session} title="Room chat" />
         </div>
 
         <div className="waiting-room-panel">
@@ -92,76 +148,209 @@ export default function RoomWaiting({
             <div>
               <p className="eyebrow">Players at the table</p>
               <h2>
-                1 <span>of {playerCount} seated</span>
+                {seats.length} <span>of {lobby.tableSize} seated</span>
               </h2>
             </div>
 
-            <span className="host-badge">You are the host</span>
+            <span className="host-badge">{isHost ? 'You are the host' : 'Guest'}</span>
           </div>
 
-          <div className="seat-count-section">
-            <span className="field-label">Table size</span>
-            <div className="seat-count-picker">
-              {[2, 3, 4].map((count) => (
-                <button
-                  key={count}
-                  type="button"
-                  className={`seat-count-btn ${
-                    playerCount === count ? 'seat-count-btn--selected' : ''
-                  }`}
-                  onClick={() => setPlayerCount(count)}
-                  aria-pressed={playerCount === count}
-                >
-                  {count} Players
-                </button>
-              ))}
+          {isHost && (
+            <div className="seat-count-section">
+              <span className="field-label">Table size</span>
+              <div className="seat-count-picker">
+                {[2, 3, 4].map((count) => (
+                  <button
+                    key={count}
+                    type="button"
+                    className={`seat-count-btn ${lobby.tableSize === count ? 'seat-count-btn--selected' : ''}`}
+                    onClick={() => session.setTableSize(count)}
+                    disabled={count < seats.length}
+                    aria-pressed={lobby.tableSize === count}
+                  >
+                    {count} Players
+                  </button>
+                ))}
+              </div>
             </div>
-          </div>
+          )}
 
           <div className="player-seat-list">
-            <article className="player-seat player-seat--host">
-              <div
-                className="player-token"
-                style={{ color: hostPieceConfig.colour }}
-              >
-                <PieceMark piece={hostToken} variant="token" />
-              </div>
+            {seats.map((seat, index) => {
+              const piece = PIECES[seat.pieceKey];
+              const mine = seat.clientId === session.myClientId;
 
-              <div className="player-details">
-                <strong>{hostName || 'Host'}</strong>
-                <span>Host · {hostPieceConfig.label} · Ready</span>
-              </div>
+              return (
+                <article
+                  className={`player-seat ${seat.clientId === 'host' ? 'player-seat--host' : ''} ${mine ? 'player-seat--mine' : ''}`}
+                  key={seat.seatId}
+                >
+                  <div className="player-token" style={{ color: piece.colour }}>
+                    <PieceMark piece={seat.pieceKey} variant="token" />
+                  </div>
 
-              <span className="ready-mark">✓</span>
-            </article>
+                  <div className="player-details">
+                    <strong>
+                      {seat.name}
+                      {mine && <em className="you-chip">You</em>}
+                    </strong>
+                    <span>
+                      {seatRole(seat, session)} · {piece.label}
+                    </span>
+                  </div>
 
-            {openSeats.map((seatIndex) => (
-              <article className="player-seat player-seat--open" key={seatIndex}>
-                <div className="empty-token">+</div>
+                  {isHost && seat.clientId !== 'host' ? (
+                    <button
+                      type="button"
+                      className="seat-remove"
+                      onClick={() => session.removeSeat(seat.seatId)}
+                      aria-label={`Remove ${seat.name}`}
+                      title="Remove from the table"
+                    >
+                      ✕
+                    </button>
+                  ) : (
+                    <span className="seat-number">0{index + 1}</span>
+                  )}
+                </article>
+              );
+            })}
 
-                <div className="player-details">
-                  <strong>AI Opponent {seatIndex}</strong>
-                  <span>Joins when the match starts</span>
-                </div>
+            {Array.from({ length: openSeats }, (_, index) => {
+              const seatNumber = seats.length + index + 1;
+              const menuOpen = openMenu === seatNumber;
 
-                <span className="seat-number">0{seatIndex + 1}</span>
-              </article>
-            ))}
+              return (
+                <article
+                  className={`player-seat player-seat--open ${menuOpen ? 'player-seat--menu' : ''}`}
+                  key={`open-${seatNumber}`}
+                >
+                  <div className="empty-token">
+                    <span className="waiting-pulse" />
+                  </div>
+
+                  <div className="player-details">
+                    <strong className="waiting-text">
+                      Waiting for someone to join
+                      <span className="waiting-dots" aria-hidden="true">
+                        <i />
+                        <i />
+                        <i />
+                      </span>
+                    </strong>
+                    <span>Seat 0{seatNumber} · share the room code to fill it</span>
+                  </div>
+
+                  {isHost && (
+                    <div className="seat-add">
+                      <button
+                        type="button"
+                        className="seat-add-button"
+                        aria-expanded={menuOpen}
+                        onClick={() => setOpenMenu(menuOpen ? null : seatNumber)}
+                      >
+                        Add opponent
+                      </button>
+
+                      {menuOpen && (
+                        <div className="seat-add-menu" role="menu">
+                          <button type="button" role="menuitem" onClick={() => addOpponent('bot')}>
+                            <strong>Computer opponent</strong>
+                            <span>Free, plays the built in strategy</span>
+                          </button>
+                          <button
+                            type="button"
+                            role="menuitem"
+                            onClick={() => addOpponent('ai')}
+                            disabled={!hasKey}
+                          >
+                            <strong>AI opponent · Premium</strong>
+                            <span>{hasKey ? 'Thinks with Claude using your key' : 'Add your API key below first'}</span>
+                          </button>
+                        </div>
+                      )}
+                    </div>
+                  )}
+                </article>
+              );
+            })}
           </div>
+
+          {isHost && (
+            <div className="premium-ai">
+              <div className="premium-ai-head">
+                <div>
+                  <p className="eyebrow">Premium AI opponents</p>
+                  <span>Opponents that reason about every purchase and bid with Claude, using your own API key</span>
+                </div>
+                <button
+                  type="button"
+                  className="match-info-button"
+                  onClick={() => setShowKeyInfo(true)}
+                  aria-label="How your API key is kept safe"
+                  title="How your API key is kept safe"
+                >
+                  i
+                </button>
+              </div>
+
+              {hasKey ? (
+                <div className="premium-ai-status">
+                  <span className="status-dot" />
+                  <span>Key held in this tab's memory only{hasAiSeat ? ', AI opponents are ready' : ', add an AI opponent to a seat'}</span>
+                  <button type="button" className="text-link" onClick={forgetKey}>
+                    Forget key
+                  </button>
+                </div>
+              ) : (
+                <div className="premium-ai-form">
+                  <input
+                    ref={keyInputRef}
+                    type="password"
+                    className="lobby-input"
+                    defaultValue=""
+                    onChange={(event) => setHasDraft(event.target.value.trim().length > 0)}
+                    onKeyDown={(event) => event.key === 'Enter' && applyKey()}
+                    placeholder="Claude API key"
+                    aria-label="Claude API key"
+                    autoComplete="off"
+                    autoCorrect="off"
+                    autoCapitalize="off"
+                    spellCheck={false}
+                    data-lpignore="true"
+                    data-1p-ignore="true"
+                    data-form-type="other"
+                  />
+                  <GoldButton variant="ghost" onClick={applyKey} disabled={!hasDraft}>
+                    Use key
+                  </GoldButton>
+                </div>
+              )}
+            </div>
+          )}
 
           <div className="host-controls">
             <div>
-              <p className="eyebrow">Host controls</p>
+              <p className="eyebrow">{isHost ? 'Host controls' : 'Getting ready'}</p>
               <span>
-                Start now with {playerCount - 1} AI opponent{playerCount > 2 ? 's' : ''}, each match runs
-                for {TOTAL_MATCH_TURNS} turns shared by the whole table
+                {isHost
+                  ? seats.length < 2
+                    ? 'Wait for a friend or add an opponent to an open seat, you need at least 2 players'
+                    : `Start with ${seats.length} players, the match runs for ${TOTAL_MATCH_TURNS} turns or until one player is left standing`
+                  : 'Waiting for the host to start the game'}
               </span>
             </div>
 
-            <GoldButton onClick={handleStart}>Start game</GoldButton>
+            {isHost && (
+              <GoldButton onClick={() => session.startGame()} disabled={seats.length < 2}>
+                Start game
+              </GoldButton>
+            )}
           </div>
         </div>
       </section>
+
+      {showKeyInfo && <ApiKeyInfo onClose={() => setShowKeyInfo(false)} />}
     </main>
   );
 }
