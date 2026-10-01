@@ -1,6 +1,7 @@
 import { useEffect, useState } from 'react';
 import BrandLogo, { BrandMark } from './BrandLogo';
 import GoldButton from './GoldButton';
+import VolumeControl from './VolumeControl';
 
 const sectionLinks = [
   { id: 'overview', label: 'Overview' },
@@ -11,23 +12,7 @@ const sectionLinks = [
   { id: 'faq', label: 'FAQ' },
 ];
 
-function SoundIcon({ on }) {
-  return (
-    <svg viewBox="0 0 24 24" aria-hidden="true" className="nav-icon">
-      <path d="M4 9.5h3.2L12 5.5v13l-4.8-4H4z" />
-      {on ? (
-        <>
-          <path className="nav-icon-wave" d="M15.5 9a4 4 0 0 1 0 6" />
-          <path className="nav-icon-wave" d="M18 6.5a7.5 7.5 0 0 1 0 11" />
-        </>
-      ) : (
-        <path className="nav-icon-wave" d="m16 9.5 5 5m0-5-5 5" />
-      )}
-    </svg>
-  );
-}
-
-export default function Navbar({ musicEnabled, onMusicToggle, onNavigate, onPlay }) {
+export default function Navbar({ musicEnabled, volume, onVolume, onMusicToggle, onNavigate, onPlay }) {
   const [isStuck, setIsStuck] = useState(false);
 
   // The local nav gains its frosted backdrop only after the global bar has
@@ -62,16 +47,13 @@ export default function Navbar({ musicEnabled, onMusicToggle, onNavigate, onPlay
             ))}
           </nav>
 
-          <button
-            className="global-nav-sound"
-            type="button"
-            onClick={onMusicToggle}
-            aria-pressed={musicEnabled}
-            aria-label={musicEnabled ? 'Turn music off' : 'Turn music on'}
-            title={musicEnabled ? 'Music on' : 'Music off'}
-          >
-            <SoundIcon on={musicEnabled} />
-          </button>
+          <VolumeControl
+            className="global-nav-volume"
+            enabled={musicEnabled}
+            volume={volume}
+            onToggle={onMusicToggle}
+            onVolume={onVolume}
+          />
         </div>
       </header>
 

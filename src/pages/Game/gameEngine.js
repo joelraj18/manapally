@@ -36,6 +36,12 @@ export const DEFAULT_TIMING = {
 };
 
 export const AUCTION_MIN_BID = 10000;
+export const DETENTION_FINE = 50000;
+export const DETENTION_MAX_ATTEMPTS = 3;
+// Kandayam (Land Tax) and Vajra (Diamond) Tax, on the same thousand rupee
+// scale as every other amount on the board.
+export const TAXES = { 4: 200000, 38: 100000 };
+const BUILD_RESERVE = 200000;
 export const AUCTION_INCREMENT = 10000;
 const BOT_RESERVE = 120000;
 
@@ -83,6 +89,7 @@ export const createInitialState = (players) => {
     balances: each(() => STARTING_BALANCE),
     pardons: each(() => 0),
     doubles: each(() => 0),
+    detained: each(() => null), // turns already served in Kaidi Kottai, or null when free
     bankrupt: each(() => false),
     deeds: {},
     turnCount: 0,
@@ -271,7 +278,10 @@ export default class GameEngine {
     const active = this.activePlayer;
 
     if (active.kind === 'bot' || active.kind === 'ai') {
-      this.turnTimer = this.later(() => this.playTurn(active.id), this.timing.botDelay);
+      this.turnTimer = this.later(
+        () => this.playTurn(active.id, { release: this.botRelease(active.id) }),
+        this.timing.botDelay,
+      );
     } else if (active.clientId) {
       this.turnTimer = this.later(() => {
         this.chat(`${active.name} was away, the table rolled for them`);
@@ -283,7 +293,10 @@ export default class GameEngine {
   // ---------------------------------------------------------------- turns
 
   // Plays one complete turn. Returns false when it is not that player's turn.
-  async playTurn(playerId) {
+  // A player held in Kaidi Kottai may pass `release: 'pay'` to pay the fine or
+  // `release: 'pardon'` to spend a pardon before rolling; otherwise they roll
+  // for doubles.
+  async playTurn(playerId, { release } = {}) {
     const { state } = this;
 
     if (
@@ -308,38 +321,110 @@ export default class GameEngine {
     };
 
     try {
-      this.set({ rolling: true, dice: null });
-      say(`${name} rolls the royal dice`);
-      await this.sleep(this.timing.roll);
+      let detained = this.isDetained(playerId);
 
-      const d1 = this.rollDie();
-      const d2 = this.rollDie();
-      const total = d1 + d2;
-      const isDouble = d1 === d2;
-      const doubles = isDouble ? this.state.doubles[playerId] + 1 : 0;
+      if (detained && release === 'pardon' && this.state.pardons[playerId] > 0) {
+        this.set({ pardons: { ...this.state.pardons, [playerId]: this.state.pardons[playerId] - 1 } });
+        this.release(playerId);
+        say(`${name} used a Get Out of Kaidi Kottai Free pardon`);
+        detained = false;
+      } else if (detained && release === 'pay') {
+        this.charge(playerId, DETENTION_FINE, null, say);
 
-      lines.length = 0;
-      this.set({
-        rolling: false,
-        dice: [d1, d2],
-        doubles: { ...this.state.doubles, [playerId]: doubles === 3 ? 0 : doubles },
-      });
+        if (!this.isAlive(playerId)) {
+          this.endTurn();
+          return true;
+        }
 
-      if (doubles === 3) {
-        say(`${name} rolled doubles three times`);
-        say(`${name} is sent to Kaidi Kottai (Detention)`);
-        this.setPosition(playerId, DETENTION_SPACE);
-        await this.sleep(this.timing.turnGap * 2);
-      } else {
+        this.release(playerId);
+        say(`${name} paid the ${formatRupees(DETENTION_FINE)} fine and leaves Kaidi Kottai`);
+        detained = false;
+      }
+
+      // Doubles earn another roll; a third double in one turn means detention.
+      let doubles = 0;
+
+      for (;;) {
+        this.set({ rolling: true, dice: null });
+        say(`${name} rolls the royal dice`);
+        await this.sleep(this.timing.roll);
+
+        const d1 = this.rollDie();
+        const d2 = this.rollDie();
+        const total = d1 + d2;
+        const isDouble = d1 === d2;
+        lines.pop();
+        this.set({ rolling: false, dice: [d1, d2] });
+
+        if (detained) {
+          const attempt = this.state.detained[playerId] + 1;
+
+          if (isDouble) {
+            say(`${name} rolled doubles ${d1} + ${d2} and walks free`);
+            this.release(playerId);
+          } else if (attempt >= DETENTION_MAX_ATTEMPTS) {
+            say(`${name} rolled ${d1} + ${d2}, a third miss, and must pay the fine`);
+            this.charge(playerId, DETENTION_FINE, null, say);
+
+            if (!this.isAlive(playerId)) {
+              break;
+            }
+
+            this.release(playerId);
+          } else {
+            say(`${name} rolled ${d1} + ${d2} and stays in Kaidi Kottai, attempt ${attempt} of ${DETENTION_MAX_ATTEMPTS}`);
+            this.set({ detained: { ...this.state.detained, [playerId]: attempt } });
+            await this.sleep(this.timing.turnGap);
+            break;
+          }
+
+          // Leaving detention moves the token, but never earns a second roll.
+          await this.sleep(this.timing.afterRoll);
+          const passed = await this.walk(playerId, total);
+          this.awardStart(playerId, passed, say);
+          await this.resolveLanding(playerId, total, say, { depth: 0 });
+          break;
+        }
+
+        doubles = isDouble ? doubles + 1 : 0;
+        this.set({ doubles: { ...this.state.doubles, [playerId]: doubles } });
+
+        if (doubles === 3) {
+          say(`${name} rolled doubles three times in a row`);
+          this.sendToDetention(playerId, say);
+          await this.sleep(this.timing.turnGap);
+          break;
+        }
+
         say(`${name} rolled ${isDouble ? 'doubles ' : ''}${d1} + ${d2} = ${total}`);
         await this.sleep(this.timing.afterRoll);
 
         const passedStart = await this.walk(playerId, total);
         this.awardStart(playerId, passedStart, say);
         await this.resolveLanding(playerId, total, say, { depth: 0 });
+
+        if (
+          !isDouble ||
+          this.isDetained(playerId) ||
+          !this.isAlive(playerId) ||
+          this.state.gameOver
+        ) {
+          break;
+        }
+
+        say(`Doubles, ${name} rolls again`);
         await this.sleep(this.timing.turnGap);
       }
 
+      // Computer and AI opponents develop their estate between rolls.
+      const player = this.player(playerId);
+
+      if ((player.kind === 'bot' || player.kind === 'ai') && this.isAlive(playerId)) {
+        this.botDevelop(playerId, say);
+      }
+
+      await this.sleep(this.timing.turnGap);
+      this.set({ doubles: { ...this.state.doubles, [playerId]: 0 } });
       this.endTurn();
       return true;
     } catch (error) {
@@ -353,6 +438,89 @@ export default class GameEngine {
         this.set({ busy: false, rolling: false });
         this.schedule();
       }
+    }
+  }
+
+  isDetained(playerId) {
+    const served = this.state.detained?.[playerId];
+    return served !== null && served !== undefined;
+  }
+
+  release(playerId) {
+    this.set({ detained: { ...this.state.detained, [playerId]: null } });
+  }
+
+  // Straight to Kaidi Kottai: no walking, no Rajyabhishekam reward, and the
+  // turn ends even after doubles.
+  sendToDetention(playerId, say) {
+    this.set({
+      positions: { ...this.state.positions, [playerId]: DETENTION_SPACE },
+      detained: { ...this.state.detained, [playerId]: 0 },
+    });
+    say(`${this.nameOf(playerId)} is sent to Kaidi Kottai (Detention)`);
+  }
+
+  // How a computer leaves detention: a pardon if held, the fine if cash is
+  // comfortable, otherwise roll for doubles.
+  botRelease(playerId) {
+    if (!this.isDetained(playerId)) {
+      return undefined;
+    }
+
+    if (this.state.pardons[playerId] > 0) {
+      return 'pardon';
+    }
+
+    return this.state.balances[playerId] >= DETENTION_FINE + 400000 ? 'pay' : undefined;
+  }
+
+  // Computer and AI opponents lift mortgages and build houses and hotels on
+  // complete colour families, always keeping a cash reserve.
+  botDevelop(playerId, say) {
+    const name = this.nameOf(playerId);
+
+    Object.keys(this.state.deeds)
+      .filter((id) => this.state.deeds[id].owner === playerId && this.state.deeds[id].mortgaged)
+      .forEach((id) => {
+        const cost = Estate.unmortgageCost(id, BOARD_SPACES);
+
+        if (this.state.balances[playerId] - cost >= BUILD_RESERVE * 2 && this.manageProperty(playerId, id, 'unmortgage')) {
+          say(`${name} lifted the mortgage on ${BOARD_SPACES[id].name}`);
+        }
+      });
+
+    let built = 0;
+    let hotels = 0;
+
+    for (let guard = 0; guard < 40; guard += 1) {
+      const deeds = this.state.deeds;
+      const balance = this.state.balances[playerId];
+      const target = Object.keys(deeds).find((id) => {
+        const details = Estate.propertyDetails[id];
+        return (
+          deeds[id].owner === playerId &&
+          details &&
+          balance - details.houseCost >= BUILD_RESERVE &&
+          Estate.canBuild(deeds, id, BOARD_SPACES)
+        );
+      });
+
+      if (!target || !this.manageProperty(playerId, target, 'build')) {
+        break;
+      }
+
+      if (this.state.deeds[target].hotel) {
+        hotels += 1;
+      } else {
+        built += 1;
+      }
+    }
+
+    if (built || hotels) {
+      const parts = [];
+      if (built) parts.push(`${built} house${built > 1 ? 's' : ''}`);
+      if (hotels) parts.push(`${hotels} hotel${hotels > 1 ? 's' : ''}`);
+      say(`${name} built ${parts.join(' and ')}`);
     }
   }
 
@@ -485,9 +653,18 @@ export default class GameEngine {
         break;
 
       case 'go-to-detention':
-        say(`${name} is marched straight to Kaidi Kottai`);
-        this.setPosition(playerId, DETENTION_SPACE);
+        this.sendToDetention(playerId, say);
         break;
+
+      case 'tax': {
+        const amount = TAXES[space.id] || 0;
+
+        if (amount > 0) {
+          const paid = this.charge(playerId, amount, null, say);
+          say(`${name} paid ${formatRupees(paid)} ${space.name} ${space.subname || ''}`.trim());
+        }
+        break;
+      }
 
       default:
         break;
@@ -819,8 +996,7 @@ export default class GameEngine {
       }
 
       case 'detention':
-        this.setPosition(playerId, DETENTION_SPACE);
-        say(`${name} is sent straight to Kaidi Kottai, no Rajyabhishekam reward`);
+        this.sendToDetention(playerId, say);
         break;
 
       case 'collect':
@@ -980,6 +1156,7 @@ export default class GameEngine {
       deeds,
       balances: { ...this.state.balances, [playerId]: 0 },
       bankrupt: { ...this.state.bankrupt, [playerId]: true },
+      detained: { ...this.state.detained, [playerId]: null },
     });
 
     const message = heir

@@ -31,6 +31,14 @@ const clearPremiumKey = () =>
 
 export default function Game() {
   const [isMusicEnabled, setIsMusicEnabled] = useState(false);
+  const [volume, setVolume] = useState(() => {
+    try {
+      const saved = Number(window.localStorage.getItem('manapally-volume'));
+      return saved > 0 && saved <= 1 ? saved : 0.7;
+    } catch {
+      return 0.7;
+    }
+  });
   const [currentView, setCurrentView] = useState('home');
   const [lobbyPiece, setLobbyPiece] = useState('lamp');
   const [session, setSession] = useState(null);
@@ -117,6 +125,23 @@ export default function Game() {
     setIsMusicEnabled((isEnabled) => !isEnabled);
   };
 
+  // The slider level is remembered on this device; dragging it unmutes, and
+  // dragging it to zero mutes.
+  const handleVolume = (next) => {
+    if (next > 0) {
+      setVolume(next);
+      setIsMusicEnabled(true);
+
+      try {
+        window.localStorage.setItem('manapally-volume', String(next));
+      } catch {
+        // Storage can be unavailable in private windows; the level still applies.
+      }
+    } else {
+      setIsMusicEnabled(false);
+    }
+  };
+
   const handlePlaybackBlocked = useCallback(() => {
     setIsMusicEnabled(false);
     showNotice('Music could not start, please tap the speaker button again');
@@ -132,6 +157,8 @@ export default function Game() {
         myPlayerId={match.myPlayerId}
         session={session}
         soundEnabled={isMusicEnabled}
+        volume={volume}
+        onVolume={handleVolume}
         onMusicToggle={handleMusicToggle}
         onExit={leaveRoom}
         onRestart={() => session.restartGame()}
@@ -156,7 +183,7 @@ export default function Game() {
 
   return (
     <>
-      <AmbientMusic isPlaying={isMusicEnabled} onPlaybackBlocked={handlePlaybackBlocked} />
+      <AmbientMusic isPlaying={isMusicEnabled} volume={volume} onPlaybackBlocked={handlePlaybackBlocked} />
 
       <Suspense fallback={<LoadingScreen onComplete={() => {}} />}>{view}</Suspense>
 
@@ -171,6 +198,8 @@ export default function Game() {
     <main className="game-shell" ref={homeRef}>
       <Navbar
         musicEnabled={isMusicEnabled}
+        volume={volume}
+        onVolume={handleVolume}
         onMusicToggle={handleMusicToggle}
         onNavigate={scrollToSection}
         onPlay={() => openLobby()}

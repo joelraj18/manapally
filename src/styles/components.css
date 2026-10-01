@@ -1,4 +1,41 @@
-/* Shared pieces used by the waiting room and the board */
+/* Shared pieces used across the landing page, rooms and the board */
+
+/* District colour families, used by the board and the landing page */
+
+:root {
+  --color-maroon: #7a3348;
+  --color-peacock: #6fa6cf;
+  --color-rose: #d24c80;
+  --color-saffron: #e8912d;
+  --color-kumkum: #c4353a;
+  --color-turmeric: #e3b022;
+  --color-emerald: #2f8f5b;
+  --color-indigo: #2f4c94;
+}
+
+/* Seat colours tint every piece through currentColor */
+
+.seat-lamp {
+  --seat: #3d9e7a;
+  color: #3d9e7a;
+}
+
+.seat-temple {
+  --seat: #b43d36;
+  color: #b43d36;
+}
+
+.seat-elephant {
+  --seat: #c98c2e;
+  color: #c98c2e;
+}
+
+.seat-bell {
+  --seat: #5580b0;
+  color: #5580b0;
+}
+
+
 
 .you-chip {
   display: inline-block;
@@ -333,4 +370,91 @@
   color: var(--ink-secondary);
   font-size: 0.92rem;
   line-height: 1.5;
+}
+
+/* Volume control */
+
+.volume-control {
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
+}
+
+.volume-toggle {
+  display: grid;
+  width: 32px;
+  height: 32px;
+  padding: 0;
+  place-items: center;
+  color: var(--ink-secondary);
+  background: transparent;
+  border: 0;
+  border-radius: 50%;
+  cursor: pointer;
+  transition: background 0.3s var(--ease), color 0.3s var(--ease);
+}
+
+.volume-toggle:hover {
+  background: rgba(29, 29, 31, 0.06);
+}
+
+.volume-control--on .volume-toggle {
+  color: var(--accent);
+}
+
+.volume-toggle svg {
+  width: 19px;
+  height: 19px;
+  fill: none;
+  stroke: currentColor;
+  stroke-width: 1.6;
+  stroke-linecap: round;
+  stroke-linejoin: round;
+}
+
+.volume-toggle .volume-icon-body {
+  fill: currentColor;
+}
+
+.volume-slider {
+  width: 78px;
+  height: 4px;
+  margin: 0;
+  background: linear-gradient(90deg, var(--accent) var(--level), rgba(118, 128, 100, 0.25) var(--level));
+  border-radius: 4px;
+  outline: none;
+  cursor: pointer;
+  appearance: none;
+  -webkit-appearance: none;
+}
+
+.volume-slider::-webkit-slider-thumb {
+  width: 14px;
+  height: 14px;
+  background: #ffffff;
+  border: 0;
+  border-radius: 50%;
+  box-shadow: 0 1px 4px rgba(0, 0, 0, 0.3);
+  -webkit-appearance: none;
+  transition: transform 0.2s var(--ease);
+}
+
+.volume-slider::-moz-range-thumb {
+  width: 14px;
+  height: 14px;
+  background: #ffffff;
+  border: 0;
+  border-radius: 50%;
+  box-shadow: 0 1px 4px rgba(0, 0, 0, 0.3);
+}
+
+.volume-slider:hover::-webkit-slider-thumb,
+.volume-slider:focus-visible::-webkit-slider-thumb {
+  transform: scale(1.15);
+}
+
+@media (max-width: 620px) {
+  .volume-slider {
+    width: 56px;
+  }
 }

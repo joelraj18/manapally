@@ -2,14 +2,23 @@ import { useCallback, useEffect, useMemo, useRef, useState } from 'react';
 import AnimatedBalance from '../../components/AnimatedBalance';
 import BrandLogo, { BrandMark } from '../../components/BrandLogo';
 import ChatPanel from '../../components/ChatPanel';
+import VolumeControl from '../../components/VolumeControl';
 import GoldButton from '../../components/GoldButton';
 import { premiumAdvisor } from '../../services/premiumAi';
 import { BOARD_GRID, BOARD_SPACES } from './boardData';
 import * as Estate from './estate';
 import { transportKind } from '../../services/roomTransport';
-import GameEngine, { AUCTION_INCREMENT, AUCTION_MIN_BID, DEFAULT_TIMING, createInitialState } from './gameEngine';
+import GameEngine, {
+  AUCTION_INCREMENT,
+  AUCTION_MIN_BID,
+  DEFAULT_TIMING,
+  DETENTION_FINE,
+  DETENTION_MAX_ATTEMPTS,
+  TAXES,
+  createInitialState,
+} from './gameEngine';
 import { START_REWARD, TOTAL_MATCH_TURNS } from './matchRules';
-import { PIECES, PieceMark, PropertyTally } from './pieces.jsx';
+import { PIECES, PieceMark } from './pieces.jsx';
 import './board-game.css';
 
 import coronationSound from '../../assets/sounds/coronation.mp3';
@@ -98,6 +107,8 @@ export default function BoardGame({
   myPlayerId,
   session,
   soundEnabled = false,
+  volume = 0.7,
+  onVolume,
   onMusicToggle,
   onExit,
   onRestart,
@@ -152,7 +163,7 @@ export default function BoardGame({
 
       switch (action.type) {
         case 'roll':
-          engine.playTurn(player.id);
+          engine.playTurn(player.id, { release: action.release });
           break;
         case 'purchase':
           engine.resolvePurchase(player.id, action.accept);
@@ -210,7 +221,7 @@ export default function BoardGame({
 
       switch (action.type) {
         case 'roll':
-          engine.playTurn(myPlayerId);
+          engine.playTurn(myPlayerId, { release: action.release });
           break;
         case 'purchase':
           engine.resolvePurchase(myPlayerId, action.accept);
@@ -245,6 +256,12 @@ export default function BoardGame({
       }),
     );
   }
+
+  useEffect(() => {
+    Object.values(audioRef.current).forEach((audio) => {
+      audio.volume = Math.min(1, Math.max(0, volume));
+    });
+  }, [volume]);
 
   useEffect(() => {
     soundOnRef.current = soundEnabled;
@@ -304,6 +321,29 @@ export default function BoardGame({
   const amAlive = me && !state.bankrupt[me.id];
   const isMyTurn = activePlayer?.id === myPlayerId;
   const canRoll = isMyTurn && amAlive && !state.busy && !state.gameOver;
+  const detainedFor = (id) => state.detained?.[id];
+  const isDetained = (id) => detainedFor(id) !== null && detainedFor(id) !== undefined;
+  const myDetention = isDetained(myPlayerId);
+
+  // Districts where you could build right now, grouped by colour family.
+  const buildable = useMemo(() => {
+    if (!myPlayerId || state.gameOver) return [];
+    const families = new Map();
+
+    Object.keys(state.deeds).forEach((id) => {
+      const space = BOARD_SPACES[id];
+      if (
+        state.deeds[id].owner === myPlayerId &&
+        space.type === 'property' &&
+        Estate.canBuild(state.deeds, id, BOARD_SPACES) &&
+        !families.has(space.colorGroup)
+      ) {
+        families.set(space.colorGroup, Number(id));
+      }
+    });
+
+    return [...families.entries()];
+  }, [state.deeds, state.gameOver, myPlayerId]);
 
   const netWorths = useMemo(
     () =>
@@ -767,26 +807,13 @@ export default function BoardGame({
             </span>
           )}
           {onMusicToggle && (
-            <button
-              className="music-toggle-button"
-              type="button"
-              onClick={onMusicToggle}
-              aria-pressed={soundEnabled}
-              aria-label={soundEnabled ? 'Mute all sound' : 'Turn sound on'}
-              title={soundEnabled ? 'Sound on' : 'Sound off'}
-            >
-              <svg viewBox="0 0 24 24" aria-hidden="true">
-                <path className="music-icon-body" d="M4 9.5h3.2L12 5.5v13l-4.8-4H4z" />
-                {soundEnabled ? (
-                  <>
-                    <path d="M15.5 9a4 4 0 0 1 0 6" />
-                    <path d="M18 6.5a7.5 7.5 0 0 1 0 11" />
-                  </>
-                ) : (
-                  <path d="m16 9.5 5 5m0-5-5 5" />
-                )}
-              </svg>
-            </button>
+            <VolumeControl
+              enabled={soundEnabled}
+              volume={volume}
+              onToggle={onMusicToggle}
+              onVolume={onVolume || (() => {})}
+              buttonClassName="music-toggle-button"
+            />
           )}
           <button className="lobby-back" type="button" onClick={onExit}>
             Exit game
@@ -819,9 +846,11 @@ export default function BoardGame({
                       <span>
                         {bankrupt
                           ? 'Bankrupt'
-                          : index === state.activeIndex && !state.gameOver
-                            ? 'Taking a turn'
-                            : kindLabel(player)}
+                          : isDetained(player.id)
+                            ? `In Kaidi Kottai, attempt ${detainedFor(player.id) + 1} of ${DETENTION_MAX_ATTEMPTS}`
+                            : index === state.activeIndex && !state.gameOver
+                              ? 'Taking a turn'
+                              : kindLabel(player)}
                       </span>
                       {state.pardons[player.id] > 0 && (
                         <span className="player-pardons" title="Get Out of Kaidi Kottai Free">
@@ -899,18 +928,27 @@ export default function BoardGame({
                     >
                       <PieceMark piece={owner.pieceKey} variant="token" />
                       <span>{deed.mortgaged ? 'Mortgaged' : owner.id === myPlayerId ? 'Yours' : owner.name}</span>
+                      {(deed.houses > 0 || deed.hotel) && (
+                        <b
+                          className={`space-builds ${deed.hotel ? 'space-builds--hotel' : ''}`}
+                          aria-label={deed.hotel ? 'Hotel' : `${deed.houses} house${deed.houses > 1 ? 's' : ''}`}
+                        >
+                          <svg viewBox="0 0 12 12" aria-hidden="true">
+                            {deed.hotel ? (
+                              <path d="M2 11V3.5L6 1l4 2.5V11H7.5V8.5h-3V11z" />
+                            ) : (
+                              <path d="M1.5 6 6 2l4.5 4H9.5v5h-7V6z" />
+                            )}
+                          </svg>
+                          {deed.hotel ? 'H' : deed.houses}
+                        </b>
+                      )}
                     </span>
                   ) : (
                     space.price && <span className="space-cost">{formatCurrency(space.price)}</span>
                   )}
 
                   {space.icon && !owner && <span className="space-icon">{space.icon}</span>}
-
-                  {deed && owner && (deed.houses > 0 || deed.hotel) && (
-                    <span className={`property-tally-container seat-${owner.pieceKey}`}>
-                      <PropertyTally houses={deed.houses} hotel={deed.hotel} />
-                    </span>
-                  )}
 
                   {tokens.length > 0 && (
                     <div className="space-tokens">
@@ -1039,6 +1077,28 @@ export default function BoardGame({
                     </p>
                   </div>
                   <div className="property-card-section">
+                    <h4>Doubles and Kaidi Kottai</h4>
+                    <p>
+                      Doubles earn another roll, while three doubles in one turn, the Go to Kaidi Kottai corner
+                      or certain cards send you to Kaidi Kottai, and to leave you can pay {formatRupees(DETENTION_FINE)}, spend
+                      a pardon or roll doubles, after {DETENTION_MAX_ATTEMPTS} misses the fine is paid for you, and
+                      you still collect rent while held
+                    </p>
+                  </div>
+                  <div className="property-card-section">
+                    <h4>Taxes</h4>
+                    <p>
+                      Kandayam asks {formatRupees(TAXES[4])} and Vajra Tax asks {formatRupees(TAXES[38])}
+                    </p>
+                  </div>
+                  <div className="property-card-section">
+                    <h4>Houses and hotels</h4>
+                    <p>
+                      Own every district in a colour family to build, one house at a time and evenly across the
+                      family, a fifth build becomes a hotel and buildings sell back for half their cost
+                    </p>
+                  </div>
+                  <div className="property-card-section">
                     <h4>Auctions</h4>
                     <p>
                       When a player declines an unowned space it goes to auction straight away, bids rise in
@@ -1109,9 +1169,58 @@ export default function BoardGame({
               : !amAlive
                 ? 'You are bankrupt'
                 : isMyTurn
-                  ? 'Roll the dice'
+                  ? myDetention
+                    ? 'Roll for doubles'
+                    : 'Roll the dice'
                   : `Waiting for ${activePlayer.name}`}
           </GoldButton>
+
+          {myDetention && amAlive && !state.gameOver && (
+            <div className="detention-panel">
+              <p>
+                You are held in Kaidi Kottai, attempt {detainedFor(myPlayerId) + 1} of {DETENTION_MAX_ATTEMPTS},
+                roll doubles to walk free or leave now and roll as normal
+              </p>
+              <div className="detention-actions">
+                <button
+                  type="button"
+                  className="property-action-btn"
+                  disabled={!canRoll || state.balances[myPlayerId] < DETENTION_FINE}
+                  onClick={() => act({ type: 'roll', release: 'pay' })}
+                >
+                  Pay {formatRupees(DETENTION_FINE)} fine
+                </button>
+                <button
+                  type="button"
+                  className="property-action-btn"
+                  disabled={!canRoll || !(state.pardons[myPlayerId] > 0)}
+                  onClick={() => act({ type: 'roll', release: 'pardon' })}
+                >
+                  Use a pardon ({state.pardons[myPlayerId] || 0})
+                </button>
+              </div>
+            </div>
+          )}
+
+          {buildable.length > 0 && amAlive && (
+            <div className="build-prompt">
+              <p className="eyebrow">Ready to build</p>
+              <div className="build-prompt-list">
+                {buildable.map(([family, spaceId]) => (
+                  <button
+                    key={family}
+                    type="button"
+                    className="build-chip"
+                    style={{ '--family': `var(--color-${family})` }}
+                    onClick={() => setSelectedProperty(spaceId)}
+                  >
+                    <span aria-hidden="true" />
+                    {family.charAt(0).toUpperCase() + family.slice(1)} family
+                  </button>
+                ))}
+              </div>
+            </div>
+          )}
 
           {state.gameOver && !showResults && (
             <button type="button" className="text-link results-reopen" onClick={() => setShowResults(true)}>

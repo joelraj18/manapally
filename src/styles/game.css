@@ -555,6 +555,11 @@
   --tone-soft: #eeebe4;
 }
 
+.guide-card--tax {
+  --tone: #8a5a12;
+  --tone-soft: #f8efdc;
+}
+
 .guide-card--rest {
   --tone: #3f7a5a;
   --tone-soft: #e4f0e8;
