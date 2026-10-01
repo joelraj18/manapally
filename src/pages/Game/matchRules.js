@@ -54,14 +54,12 @@ export const turnsPerSeat = (playerCount) =>
 export const awardStartReward = (balance, crossedStart) =>
   crossedStart ? balance + START_REWARD : balance;
 
-// Winner by highest net worth (or cash balance if no deeds provided).
+// Winner by highest total net worth: cash plus the value of everything owned.
 // Net worth: cash + unmortgaged property + 50% improvement resale + (mortgaged property − mortgage principal).
 export const calculateWinner = (balances, players, deeds = {}, spaces) => {
   const standings = players
     .map((player) => {
-      const worth = deeds && Object.keys(deeds).length > 0
-        ? netWorth(player.id, balances, deeds, spaces)
-        : (balances[player.id] || 0);
+      const worth = netWorth(player.id, balances, deeds || {}, spaces);
       return { player, worth, balance: balances[player.id] || 0 };
     })
     .sort((a, b) => b.worth - a.worth);

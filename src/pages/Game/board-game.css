@@ -145,15 +145,26 @@
 
 /* Side panels */
 
-.player-panel,
+.board-side {
+  position: sticky;
+  top: 76px;
+  display: grid;
+  gap: 16px;
+  align-content: start;
+}
+
 .turn-panel {
   position: sticky;
   top: 76px;
+}
+
+.player-panel,
+.turn-panel {
   padding: 22px;
   background: var(--surface);
   border-radius: 24px;
   box-shadow: var(--shadow-card);
-  animation: rise 0.8s var(--ease-out) both;
+  animation: rise 0.8s var(--ease-out) backwards;
 }
 
 .turn-panel {
@@ -219,8 +230,8 @@
   letter-spacing: -0.015em;
 }
 
-.game-player span:not(.game-player-token),
-.turn-player span:not(.turn-token) {
+.game-player > div > span,
+.turn-player > div > span {
   color: var(--ink-tertiary);
   font-size: 0.78rem;
   line-height: 1.35;
@@ -275,7 +286,9 @@
     inset 0 0 0 1px rgba(255, 255, 255, 0.55),
     inset 0 -8px 20px rgba(80, 94, 60, 0.15),
     var(--shadow-float);
-  animation: rise 0.9s 0.05s var(--ease-out) both;
+  /* backwards, not both: a transform left behind would trap the fixed
+     overlays inside the board instead of covering the screen */
+  animation: rise 0.9s 0.05s var(--ease-out) backwards;
 }
 
 .game-board {
@@ -683,7 +696,7 @@
   background: var(--sage-50);
   border-radius: 16px;
   box-shadow: inset 0 0 0 1px var(--sage-200);
-  animation: rise 0.6s var(--ease-out) both;
+  animation: rise 0.6s var(--ease-out) backwards;
 }
 
 .match-result-label {
@@ -1163,48 +1176,28 @@
 /* Seat colours tint every piece through currentColor */
 
 .seat-lamp {
+  --seat: #3d9e7a;
   color: #3d9e7a;
 }
 
 .seat-temple {
+  --seat: #b43d36;
   color: #b43d36;
 }
 
 .seat-elephant {
+  --seat: #c98c2e;
   color: #c98c2e;
 }
 
 .seat-bell {
+  --seat: #5580b0;
   color: #5580b0;
 }
 
 .piece-mark--token path {
   fill: currentColor;
   stroke: none;
-}
-
-/* Ownership stamp */
-
-.ownership-stamp {
-  position: absolute;
-  z-index: 1;
-  top: 54%;
-  left: 50%;
-  opacity: 0.22;
-  pointer-events: none;
-  transform: translate(-50%, -50%);
-}
-
-.ownership-stamp svg {
-  width: clamp(18px, 2.6vw, 34px);
-  height: clamp(18px, 2.6vw, 34px);
-}
-
-.property-tally-container {
-  position: absolute;
-  z-index: 2;
-  bottom: 3px;
-  left: 4px;
 }
 
 /* Responsive */
@@ -1217,6 +1210,7 @@
   .turn-panel {
     position: static;
     grid-column: 1 / -1;
+    order: 3;
     grid-template-columns: minmax(0, 1fr) auto minmax(220px, 280px);
     align-items: center;
     gap: 8px 24px;
@@ -1269,7 +1263,7 @@
     grid-column: 1 / -1;
   }
 
-  .player-panel {
+  .board-side {
     position: static;
     order: 3;
   }
@@ -1344,5 +1338,465 @@
   .die-face {
     width: 38px;
     height: 38px;
+  }
+}
+
+/* Players: balances count and net worth */
+
+.game-player-token {
+  grid-row: span 3;
+  align-self: start;
+}
+
+.game-player-balance {
+  grid-column: 2;
+  justify-self: start;
+  color: var(--sage-700);
+  font-size: 0.95rem;
+  font-weight: 700;
+}
+
+.game-player-worth {
+  grid-column: 2;
+  color: var(--ink-tertiary);
+  font-size: 0.72rem;
+}
+
+.game-player--bankrupt {
+  opacity: 0.5;
+}
+
+.game-player--bankrupt .game-player-balance {
+  text-decoration: line-through;
+}
+
+.room-code-pill {
+  padding: 4px 10px;
+  color: var(--sage-800);
+  background: var(--sage-100);
+  border-radius: var(--radius-pill);
+  font-family: var(--font-mono);
+  font-size: 0.78rem;
+  font-weight: 600;
+  letter-spacing: 0.12em;
+}
+
+/* Ownership: a solid badge takes the place of the price label */
+
+.space-owner {
+  position: relative;
+  z-index: 1;
+  display: flex;
+  align-items: center;
+  align-self: stretch;
+  gap: 3px;
+  min-width: 0;
+  margin: 0 calc(clamp(4px, 0.6vw, 8px) * -1) calc(clamp(4px, 0.6vw, 8px) * -1);
+  padding: clamp(2px, 0.35vw, 4px) clamp(3px, 0.5vw, 6px);
+  overflow: hidden;
+  color: #ffffff;
+  background: var(--seat);
+  font-size: clamp(0.38rem, 0.58vw, 0.6rem);
+  font-weight: 700;
+  animation: ownerIn 0.5s var(--ease-spring);
+}
+
+.space-owner .piece-mark {
+  flex: 0 0 auto;
+  width: clamp(8px, 1vw, 13px);
+  height: clamp(8px, 1vw, 13px);
+}
+
+.space-owner .piece-mark path {
+  fill: #ffffff;
+}
+
+.space-owner span {
+  overflow: hidden;
+  color: #ffffff;
+  text-overflow: clip;
+  white-space: nowrap;
+}
+
+.space-owner--mortgaged {
+  background: repeating-linear-gradient(135deg, var(--seat) 0 4px, color-mix(in srgb, var(--seat) 70%, #ffffff) 4px 8px);
+}
+
+@keyframes ownerIn {
+  from {
+    opacity: 0;
+    transform: translateY(100%);
+  }
+
+  to {
+    opacity: 1;
+    transform: none;
+  }
+}
+
+.board-space--owned .space-tokens {
+  bottom: calc(clamp(10px, 1.5vw, 20px) + 2px);
+}
+
+.property-tally-container {
+  position: absolute;
+  z-index: 2;
+  top: clamp(5px, 0.65vw, 8px);
+  right: 3px;
+  bottom: auto;
+  left: auto;
+}
+
+.property-tally-container svg {
+  width: clamp(12px, 1.4vw, 20px);
+  height: auto;
+}
+
+.centre-status {
+  margin-top: 14px;
+  padding: 6px 12px;
+  color: var(--sage-800);
+  background: rgba(255, 255, 255, 0.8);
+  border-radius: var(--radius-pill);
+  font-size: clamp(0.5rem, 0.85vw, 0.8rem);
+  font-weight: 500;
+  animation: pulse 2s var(--ease) infinite;
+}
+
+/* Auction */
+
+.auction-sheet {
+  width: min(460px, 100%);
+}
+
+.auction-sheet .property-card-header {
+  padding-right: 90px;
+}
+
+.auction-clock {
+  position: absolute;
+  top: 24px;
+  right: 22px;
+  display: grid;
+  min-width: 54px;
+  height: 54px;
+  padding: 0 8px;
+  place-items: center;
+  color: var(--sage-800);
+  background: var(--sage-100);
+  border-radius: 50%;
+  font-size: 1.15rem;
+  font-variant-numeric: tabular-nums;
+  font-weight: 700;
+  transition: background 0.3s var(--ease), color 0.3s var(--ease);
+}
+
+.auction-clock--urgent {
+  color: #ffffff;
+  background: var(--danger);
+  animation: pulse 0.8s var(--ease) infinite;
+}
+
+.auction-timer {
+  height: 4px;
+  background: var(--sage-100);
+}
+
+.auction-timer span {
+  display: block;
+  height: 100%;
+  background: linear-gradient(90deg, var(--sage-500), var(--sage-700));
+  transform-origin: left center;
+  transition: transform 0.1s linear;
+}
+
+.auction-lead {
+  display: grid;
+  justify-items: center;
+  gap: 2px;
+  padding: 8px 0 16px;
+  text-align: center;
+}
+
+.auction-lead > span:first-child {
+  color: var(--ink-tertiary);
+  font-size: 0.8rem;
+}
+
+.auction-amount {
+  color: var(--ink);
+  font-size: 2.2rem;
+  font-variant-numeric: tabular-nums;
+  font-weight: 700;
+  letter-spacing: -0.04em;
+  animation: bidPop 0.45s var(--ease-spring);
+}
+
+@keyframes bidPop {
+  from {
+    color: var(--success);
+    transform: scale(1.12);
+  }
+
+  to {
+    transform: none;
+  }
+}
+
+.auction-leader {
+  color: var(--sage-700);
+  font-size: 0.86rem;
+  font-weight: 600;
+}
+
+.auction-bids {
+  display: grid;
+  gap: 4px;
+  max-height: 120px;
+  margin: 0 0 16px;
+  padding: 10px 12px;
+  overflow-y: auto;
+  list-style: none;
+  background: var(--canvas);
+  border-radius: 14px;
+}
+
+.auction-bids li {
+  display: flex;
+  justify-content: space-between;
+  font-size: 0.84rem;
+  font-variant-numeric: tabular-nums;
+  animation: chatIn 0.3s var(--ease-out);
+}
+
+.auction-bids li:first-child {
+  font-weight: 700;
+}
+
+.auction-actions {
+  display: grid;
+  grid-template-columns: repeat(3, 1fr);
+  gap: 8px;
+}
+
+.auction-bid-button {
+  min-height: 46px;
+  padding: 0 10px;
+  color: #ffffff;
+  background: var(--accent);
+  border: 0;
+  border-radius: 14px;
+  cursor: pointer;
+  font-size: 0.9rem;
+  font-weight: 600;
+  transition: background 0.3s var(--ease), transform 0.2s var(--ease), opacity 0.3s var(--ease);
+}
+
+.auction-bid-button:hover:not(:disabled) {
+  background: var(--accent-hover);
+}
+
+.auction-bid-button:active:not(:disabled) {
+  transform: scale(0.96);
+}
+
+.auction-bid-button:disabled {
+  cursor: not-allowed;
+  opacity: 0.35;
+}
+
+.auction-hint {
+  margin-top: 12px;
+  color: var(--ink-tertiary);
+  font-size: 0.8rem;
+  text-align: center;
+}
+
+/* End of match */
+
+.results-sheet {
+  width: min(620px, 100%);
+  padding-bottom: 26px;
+}
+
+.results-hero {
+  display: grid;
+  justify-items: center;
+  gap: 4px;
+  padding: 34px 28px 18px;
+  text-align: center;
+  background:
+    radial-gradient(70% 90% at 50% 0%, rgba(200, 208, 174, 0.65), transparent),
+    var(--surface);
+}
+
+.results-crown {
+  display: grid;
+  width: 68px;
+  height: 68px;
+  margin-bottom: 10px;
+  place-items: center;
+  color: #ffffff;
+  background: linear-gradient(150deg, var(--sage-500), var(--sage-800));
+  border-radius: 22px;
+  box-shadow: 0 14px 30px rgba(60, 71, 46, 0.3);
+  animation: crownIn 0.9s var(--ease-spring);
+}
+
+.results-crown svg {
+  width: 36px;
+  height: 36px;
+  fill: none;
+  stroke: currentColor;
+  stroke-width: 1.7;
+  stroke-linecap: round;
+  stroke-linejoin: round;
+}
+
+@keyframes crownIn {
+  from {
+    opacity: 0;
+    transform: translateY(-18px) rotate(-12deg) scale(0.7);
+  }
+
+  to {
+    opacity: 1;
+    transform: none;
+  }
+}
+
+.results-hero h3 {
+  font-size: clamp(1.6rem, 4vw, 2.2rem);
+  font-weight: 700;
+  letter-spacing: -0.035em;
+  line-height: 1.1;
+}
+
+.results-sub {
+  color: var(--ink-tertiary);
+  font-size: 0.86rem;
+}
+
+.results-table {
+  display: grid;
+  gap: 8px;
+  margin: 0;
+  padding: 6px 22px 0;
+  list-style: none;
+}
+
+.results-row {
+  display: grid;
+  grid-template-columns: 28px 40px minmax(0, 1fr) auto;
+  align-items: center;
+  gap: 12px;
+  padding: 12px 14px;
+  background: var(--canvas);
+  border-radius: 16px;
+  animation: rise 0.6s var(--ease-out) backwards;
+  animation-delay: var(--reveal-delay, 0s);
+}
+
+.results-row--winner {
+  background: linear-gradient(120deg, var(--sage-100), var(--sage-50));
+  box-shadow: inset 0 0 0 1.5px var(--sage-400);
+}
+
+.results-rank {
+  color: var(--ink-tertiary);
+  font-size: 1.1rem;
+  font-weight: 700;
+  text-align: center;
+}
+
+.results-row--winner .results-rank {
+  color: var(--sage-800);
+}
+
+.results-token {
+  display: grid;
+  width: 40px;
+  height: 40px;
+  place-items: center;
+  background: var(--surface);
+  border-radius: 50%;
+  box-shadow: 0 0 0 1px var(--hairline);
+}
+
+.results-token .piece-mark {
+  width: 24px;
+  height: 24px;
+}
+
+.results-name {
+  display: grid;
+  gap: 2px;
+  min-width: 0;
+}
+
+.results-name strong {
+  font-size: 1rem;
+  font-weight: 600;
+}
+
+.results-name span {
+  color: var(--ink-tertiary);
+  font-size: 0.76rem;
+  line-height: 1.35;
+}
+
+.results-worth {
+  display: grid;
+  justify-items: end;
+  gap: 1px;
+}
+
+.results-worth span {
+  color: var(--ink-tertiary);
+  font-size: 0.7rem;
+}
+
+.results-worth strong {
+  color: var(--sage-800);
+  font-size: 1.05rem;
+  font-variant-numeric: tabular-nums;
+  font-weight: 700;
+}
+
+.results-actions {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  justify-content: center;
+  gap: 12px 18px;
+  margin-top: 22px;
+  padding: 0 22px;
+}
+
+.results-wait {
+  margin-top: 12px;
+  color: var(--ink-tertiary);
+  font-size: 0.8rem;
+  text-align: center;
+}
+
+.results-reopen {
+  justify-self: center;
+  margin-top: 12px;
+  font-size: 0.9rem;
+}
+
+@media (max-width: 540px) {
+  .results-row {
+    grid-template-columns: 22px 34px minmax(0, 1fr);
+  }
+
+  .results-worth {
+    grid-column: 2 / -1;
+    justify-items: start;
+  }
+
+  .auction-actions {
+    grid-template-columns: 1fr;
   }
 }

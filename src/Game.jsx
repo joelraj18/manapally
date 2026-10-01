@@ -1,12 +1,12 @@
-import React, { useCallback, useEffect, useRef, useState } from 'react';
+import React, { Suspense, lazy, useCallback, useEffect, useRef, useState } from 'react';
 import AmbientMusic from './components/AmbientMusic';
 import BackgroundEffects from './components/BackgroundEffects';
 import Footer from './components/Footer';
 import GoldButton from './components/GoldButton';
 import Hero from './components/Hero';
+import LoadingScreen from './components/LoadingScreen';
 import Navbar from './components/Navbar';
 import useReveal from './hooks/useReveal';
-import BoardGame from './pages/Game/BoardGame';
 import BoardGuide from './pages/Home/BoardGuide';
 import DistrictFamilies from './pages/Home/DistrictFamilies';
 import FairPlay from './pages/Home/FairPlay';
@@ -15,17 +15,26 @@ import Highlights from './pages/Home/Highlights';
 import HowToPlay from './pages/Home/HowToPlay';
 import PieceShelf from './pages/Home/PieceShelf';
 import Tips from './pages/Home/Tips';
-import Lobby from './pages/Lobby/Lobby';
 
 import './styles/game.css';
 import './styles/hero.css';
 import './styles/navbar.css';
 
+// Rooms and the board load on demand, so the landing page stays light and
+// PeerJS and the Claude SDK download only when someone opens a room.
+const Lobby = lazy(() => import('./pages/Lobby/Lobby'));
+const RoomWaiting = lazy(() => import('./pages/Lobby/RoomWaiting'));
+const BoardGame = lazy(() => import('./pages/Game/BoardGame'));
+
+const clearPremiumKey = () =>
+  import('./services/premiumAi').then((module) => module.clearPremiumKey());
+
 export default function Game() {
   const [isMusicEnabled, setIsMusicEnabled] = useState(false);
   const [currentView, setCurrentView] = useState('home');
   const [lobbyPiece, setLobbyPiece] = useState('lamp');
-  const [matchConfig, setMatchConfig] = useState({ playerCount: 2, hostPiece: 'lamp', hostName: 'Host' });
+  const [session, setSession] = useState(null);
+  const [match, setMatch] = useState(null);
   const [notice, setNotice] = useState('');
   const homeRef = useRef(null);
 
@@ -41,8 +50,51 @@ export default function Game() {
 
     window.setTimeout(() => {
       setNotice('');
-    }, 2800);
+    }, 3200);
   }, []);
+
+  // A room lives from the lobby to the end of the last rematch.
+  useEffect(() => {
+    if (!session) {
+      return undefined;
+    }
+
+    const offStart = session.on('start', (config) => {
+      setMatch(config);
+      setCurrentView('board');
+    });
+
+    const offClosed = session.on('closed', (reason) => {
+      setSession(null);
+      setMatch(null);
+      setCurrentView('home');
+      showNotice(reason || 'The room has closed');
+    });
+
+    return () => {
+      offStart();
+      offClosed();
+    };
+  }, [session, showNotice]);
+
+  // Closing the tab closes the room for everyone at the table.
+  useEffect(() => {
+    if (!session) {
+      return undefined;
+    }
+
+    const onUnload = () => session.close();
+    window.addEventListener('pagehide', onUnload);
+    return () => window.removeEventListener('pagehide', onUnload);
+  }, [session]);
+
+  const leaveRoom = useCallback(() => {
+    session?.close();
+    setSession(null);
+    setMatch(null);
+    clearPremiumKey();
+    setCurrentView('home');
+  }, [session]);
 
   const scrollToSection = (sectionId) => {
     if (sectionId === 'top') {
@@ -60,6 +112,7 @@ export default function Game() {
     setCurrentView('lobby');
   };
 
+  // One switch for everything audible: music and every game sound.
   const handleMusicToggle = () => {
     setIsMusicEnabled((isEnabled) => !isEnabled);
   };
@@ -69,42 +122,53 @@ export default function Game() {
     showNotice('Music could not start, please tap the speaker button again');
   }, [showNotice]);
 
-  if (currentView === 'board') {
-    return (
+  let view;
+
+  if (currentView === 'board' && session && match) {
+    view = (
       <BoardGame
-        playerCount={matchConfig.playerCount}
-        hostPiece={matchConfig.hostPiece}
-        hostName={matchConfig.hostName}
-        isMusicEnabled={isMusicEnabled}
+        key={match.gameId}
+        players={match.players}
+        myPlayerId={match.myPlayerId}
+        session={session}
+        soundEnabled={isMusicEnabled}
         onMusicToggle={handleMusicToggle}
-        onExit={() => {
-          setCurrentView('home');
-        }}
+        onExit={leaveRoom}
+        onRestart={() => session.restartGame()}
       />
     );
-  }
-
-  if (currentView === 'lobby') {
-    return (
+  } else if (currentView === 'waiting' && session) {
+    view = <RoomWaiting session={session} onLeave={leaveRoom} />;
+  } else if (currentView === 'lobby') {
+    view = (
       <Lobby
         initialPiece={lobbyPiece}
-        onBack={() => {
-          setCurrentView('home');
-        }}
-        onStartGame={(config) => {
-          if (config) {
-            setMatchConfig(config);
-          }
-          setCurrentView('board');
+        onBack={() => setCurrentView('home')}
+        onSession={(next) => {
+          setSession(next);
+          setCurrentView('waiting');
         }}
       />
     );
+  } else {
+    view = renderHome();
   }
 
   return (
-    <main className="game-shell" ref={homeRef}>
+    <>
       <AmbientMusic isPlaying={isMusicEnabled} onPlaybackBlocked={handlePlaybackBlocked} />
 
+      <Suspense fallback={<LoadingScreen onComplete={() => {}} />}>{view}</Suspense>
+
+      <div className={`toast ${notice ? 'toast--visible' : ''}`} role="status" aria-live="polite">
+        {notice}
+      </div>
+    </>
+  );
+
+  function renderHome() {
+  return (
+    <main className="game-shell" ref={homeRef}>
       <Navbar
         musicEnabled={isMusicEnabled}
         onMusicToggle={handleMusicToggle}
@@ -145,10 +209,7 @@ export default function Game() {
         onMusicToggle={handleMusicToggle}
         musicEnabled={isMusicEnabled}
       />
-
-      <div className={`toast ${notice ? 'toast--visible' : ''}`} role="status" aria-live="polite">
-        {notice}
-      </div>
     </main>
   );
+  }
 }

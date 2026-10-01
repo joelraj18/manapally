@@ -85,7 +85,7 @@
 }
 
 .lobby-intro {
-  animation: rise 0.9s var(--ease-out) both;
+  animation: rise 0.9s var(--ease-out) backwards;
 }
 
 .lobby-intro h1,
@@ -172,7 +172,7 @@
   background: var(--surface);
   border-radius: var(--radius-lg);
   box-shadow: var(--shadow-float);
-  animation: rise 1s 0.12s var(--ease-out) both;
+  animation: rise 1s 0.12s var(--ease-out) backwards;
 }
 
 .lobby-panel-heading {
@@ -405,7 +405,7 @@
   background: var(--sage-50);
   border: 1px solid var(--sage-200);
   border-radius: var(--radius-md);
-  animation: rise 0.45s var(--ease-out) both;
+  animation: rise 0.45s var(--ease-out) backwards;
 }
 
 .room-created-panel > div {

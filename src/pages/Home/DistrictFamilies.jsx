@@ -1,4 +1,4 @@
-import { BOARD_SPACES } from '../Game/BoardGame';
+import { BOARD_SPACES } from '../Game/boardData';
 
 const FAMILY_NAMES = {
   maroon: 'Maroon',

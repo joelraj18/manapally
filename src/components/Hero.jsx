@@ -1,6 +1,6 @@
 import { useRef } from 'react';
 import useScrollProgress from '../hooks/useScrollProgress';
-import { BOARD_GRID, BOARD_SPACES } from '../pages/Game/BoardGame';
+import { BOARD_GRID, BOARD_SPACES } from '../pages/Game/boardData';
 import { PieceMark } from '../pages/Game/pieces.jsx';
 import { BrandMark } from './BrandLogo';
 import GoldButton from './GoldButton';

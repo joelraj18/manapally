@@ -1,646 +1,45 @@
-import { useMemo, useState, useCallback, useRef, useEffect } from 'react';
+import { useCallback, useEffect, useMemo, useRef, useState } from 'react';
+import AnimatedBalance from '../../components/AnimatedBalance';
 import BrandLogo, { BrandMark } from '../../components/BrandLogo';
+import ChatPanel from '../../components/ChatPanel';
 import GoldButton from '../../components/GoldButton';
-import {
-  TOTAL_MATCH_TURNS,
-  START_REWARD,
-  activeSeatForTurn,
-  calculateWinner,
-} from './matchRules';
-import { seatPieces, PIECES, PieceMark, PropertyTally } from './pieces.jsx';
-import * as Estate from './estate.js';
+import { premiumAdvisor } from '../../services/premiumAi';
+import { BOARD_GRID, BOARD_SPACES } from './boardData';
+import * as Estate from './estate';
+import { transportKind } from '../../services/roomTransport';
+import GameEngine, { AUCTION_INCREMENT, AUCTION_MIN_BID, DEFAULT_TIMING, createInitialState } from './gameEngine';
+import { START_REWARD, TOTAL_MATCH_TURNS } from './matchRules';
+import { PIECES, PieceMark, PropertyTally } from './pieces.jsx';
 import './board-game.css';
 
-// Import sound effects
 import coronationSound from '../../assets/sounds/coronation.mp3';
 import pallavanExpressSound from '../../assets/sounds/Pallavan Superfast Express.mp3';
-import farakkaExpressSound from '../../assets/sounds/The Farakka Express.mp3';
 import propertyBoughtSound from '../../assets/sounds/property bought.mp3';
+import farakkaExpressSound from '../../assets/sounds/The Farakka Express.mp3';
 import utilitySound from '../../assets/sounds/utility.mp3';
 import winnerSound from '../../assets/sounds/Winner.mp3';
 
-// Game configuration constants
-const STARTING_BALANCE = 1500000; // ₹15,00,000
-const MOVEMENT_STEP_DURATION = 120; // milliseconds per space
+// Kept for the landing page, which draws its preview from the board data.
+export { BOARD_SPACES, BOARD_GRID };
+export { STARTING_BALANCE } from './boardData';
 
-// Cryptographically secure random die roll (1-6)
-// Uses rejection sampling to avoid modulo bias
-const rollDie = () => {
-  const buf = new Uint8Array(1);
-  const limit = 252; // 256 - (256 % 6), largest multiple of 6 that fits in a byte
-  do {
-    crypto.getRandomValues(buf);
-  } while (buf[0] >= limit);
-  return (buf[0] % 6) + 1;
+const SOUND_FILES = {
+  coronation: coronationSound,
+  pallavanExpress: pallavanExpressSound,
+  farakkaExpress: farakkaExpressSound,
+  propertyBought: propertyBoughtSound,
+  utility: utilitySound,
+  winner: winnerSound,
 };
 
-// Roll two dice and return values with double detection
-const rollDice = () => {
-  const d1 = rollDie();
-  const d2 = rollDie();
-  return { d1, d2, total: d1 + d2, isDouble: d1 === d2 };
-};
+const { routeDetails, utilityDetails, propertyDetails } = Estate;
 
-// Cryptographically secure index in [0, range), drawn with the same rejection
-// sampling the dice use: discard any byte at or above the largest multiple of
-// `range` that fits in a byte, so every card is exactly as likely as any other.
-const randomIndex = (range) => {
-  const buf = new Uint8Array(1);
-  const limit = 256 - (256 % range);
-  do {
-    crypto.getRandomValues(buf);
-  } while (buf[0] >= limit);
-  return buf[0] % range;
-};
+const getSpaceClass = (space) =>
+  `board-space--${space.type} ${space.colorGroup ? `board-space--${space.colorGroup}` : ''}`;
 
-// Draw one card from a deck using the crypto-backed index above.
-const drawCard = (deck) => deck[randomIndex(deck.length)];
+const formatCurrency = (amount) => `₹${Math.round(amount / 1000).toLocaleString('en-IN')}K`;
+const formatRupees = (amount) => `₹${Math.round(amount).toLocaleString('en-IN')}`;
 
-// Property details for information card
-const propertyDetails = {
-  1: { rent: [2000, 10000, 30000, 90000, 160000, 250000], houseCost: 50000, mortgage: 30000 },
-  3: { rent: [4000, 20000, 60000, 180000, 320000, 450000], houseCost: 50000, mortgage: 30000 },
-  6: { rent: [6000, 30000, 90000, 270000, 400000, 550000], houseCost: 50000, mortgage: 50000 },
-  8: { rent: [6000, 30000, 90000, 270000, 400000, 550000], houseCost: 50000, mortgage: 50000 },
-  9: { rent: [8000, 40000, 100000, 300000, 450000, 600000], houseCost: 50000, mortgage: 60000 },
-  11: { rent: [10000, 50000, 150000, 450000, 625000, 750000], houseCost: 100000, mortgage: 70000 },
-  13: { rent: [10000, 50000, 150000, 450000, 625000, 750000], houseCost: 100000, mortgage: 70000 },
-  14: { rent: [12000, 60000, 180000, 500000, 700000, 900000], houseCost: 100000, mortgage: 80000 },
-  16: { rent: [14000, 70000, 200000, 550000, 750000, 950000], houseCost: 100000, mortgage: 90000 },
-  18: { rent: [14000, 70000, 200000, 550000, 750000, 950000], houseCost: 100000, mortgage: 90000 },
-  19: { rent: [16000, 80000, 220000, 600000, 800000, 1000000], houseCost: 100000, mortgage: 100000 },
-  21: { rent: [18000, 90000, 250000, 700000, 875000, 1050000], houseCost: 150000, mortgage: 110000 },
-  23: { rent: [18000, 90000, 250000, 700000, 875000, 1050000], houseCost: 150000, mortgage: 110000 },
-  24: { rent: [20000, 100000, 300000, 750000, 925000, 1100000], houseCost: 150000, mortgage: 120000 },
-  26: { rent: [22000, 110000, 330000, 800000, 975000, 1150000], houseCost: 150000, mortgage: 130000 },
-  27: { rent: [22000, 110000, 330000, 800000, 975000, 1150000], houseCost: 150000, mortgage: 130000 },
-  29: { rent: [24000, 120000, 360000, 850000, 1025000, 1200000], houseCost: 150000, mortgage: 140000 },
-  31: { rent: [26000, 130000, 390000, 900000, 1100000, 1275000], houseCost: 200000, mortgage: 150000 },
-  32: { rent: [26000, 130000, 390000, 900000, 1100000, 1275000], houseCost: 200000, mortgage: 150000 },
-  34: { rent: [28000, 150000, 450000, 1000000, 1200000, 1400000], houseCost: 200000, mortgage: 160000 },
-  37: { rent: [35000, 175000, 500000, 1100000, 1300000, 1500000], houseCost: 200000, mortgage: 175000 },
-  39: { rent: [50000, 200000, 600000, 1400000, 1700000, 2000000], houseCost: 200000, mortgage: 200000 },
-};
-
-// All four express routes share one schedule; rent scales with how many
-// routes a single owner holds rather than with houses.
-const routeDetails = {
-  price: 200000,
-  rent: [25000, 50000, 100000, 200000], // 1, 2, 3, 4 routes owned
-  mortgage: 100000,
-};
-
-// Both utilities share one schedule. Utilities charge a multiple of the dice
-// roll instead of a flat rent.
-const utilityDetails = {
-  price: 150000,
-  multipliers: [4, 10], // one utility owned, both owned
-  perPip: 1000,
-  mortgage: 75000,
-};
-
-// Board landmarks the card decks steer players toward.
-const ROUTE_SPACES = [5, 15, 25, 35];
-const UTILITY_SPACES = [12, 28];
-const DETENTION_SPACE = 10;
-const START_SPACE = 0;
-
-// The two decks. Each card carries its printed text plus a machine-readable
-// effect; `resolveCardEffect` applies whichever parts of the effect the current
-// rules support. Ownership, houses and hotels do not exist yet, so the cards
-// that price them still draw and display but settle at nothing owed.
-const RAJAS_ORDER_DECK = [
-  {
-    text: 'Advance to Brihadeeswara Boulevard',
-    effect: { kind: 'advance', target: 39 },
-  },
-  {
-    text: 'Advance to Rajyabhishekam and collect ₹2,00,000',
-    effect: { kind: 'advance', target: START_SPACE },
-  },
-  {
-    text: 'Advance to Rani Abbakka Avenue, if you pass Rajyabhishekam collect ₹2,00,000',
-    effect: { kind: 'advance', target: 24 },
-  },
-  {
-    text: 'Advance to Wodeyar Mysuru Place, if you pass Rajyabhishekam collect ₹2,00,000',
-    effect: { kind: 'advance', target: 11 },
-  },
-  {
-    text: 'Advance to the nearest Express route, if it is unowned you may buy it from the Bank and if it is owned pay the owner twice the usual rent',
-    effect: { kind: 'nearest-route' },
-  },
-  {
-    text: 'Advance to the nearest Express route, if it is unowned you may buy it from the Bank and if it is owned pay the owner twice the usual rent',
-    effect: { kind: 'nearest-route' },
-  },
-  {
-    text: 'Advance to the nearest Utility, if it is unowned you may buy it from the Bank and if it is owned throw the dice and pay the owner ten times the amount thrown × ₹1,000',
-    effect: { kind: 'nearest-utility' },
-  },
-  {
-    text: 'The royal treasury pays you a dividend of ₹50,000',
-    effect: { kind: 'collect', amount: 50000 },
-  },
-  {
-    text: 'Get Out of Kaidi Kottai Free',
-    effect: { kind: 'pardon' },
-  },
-  {
-    text: 'Go back 3 spaces',
-    effect: { kind: 'back', steps: 3 },
-  },
-  {
-    text: 'Go directly to Kaidi Kottai, do not pass Rajyabhishekam and do not collect ₹2,00,000',
-    effect: { kind: 'detention' },
-  },
-  {
-    text: 'Make general repairs on all your property, pay ₹25,000 for each house and ₹1,00,000 for each hotel',
-    effect: { kind: 'repairs', perHouse: 25000, perHotel: 100000 },
-  },
-  {
-    text: 'Chariot speeding fine of ₹15,000',
-    effect: { kind: 'pay', amount: 15000 },
-  },
-  {
-    text: 'Take a trip to the Pallavan Superfast Express, if you pass Rajyabhishekam collect ₹2,00,000',
-    effect: { kind: 'advance', target: 5 },
-  },
-  {
-    text: 'You have been elected Chief of the Royal Council, pay each player ₹50,000',
-    effect: { kind: 'pay-each', amount: 50000 },
-  },
-  {
-    text: 'Your building loan matures, collect ₹1,50,000',
-    effect: { kind: 'collect', amount: 150000 },
-  },
-];
-
-const TEMPLE_HUNDI_DECK = [
-  {
-    text: 'Advance to Rajyabhishekam and collect ₹2,00,000',
-    effect: { kind: 'advance', target: START_SPACE },
-  },
-  {
-    text: 'Treasury error in your favour, collect ₹2,00,000',
-    effect: { kind: 'collect', amount: 200000 },
-  },
-  {
-    text: "Royal vaidya's (physician's) fee, pay ₹50,000",
-    effect: { kind: 'pay', amount: 50000 },
-  },
-  {
-    text: 'From the sale of grain stock you get ₹50,000',
-    effect: { kind: 'collect', amount: 50000 },
-  },
-  {
-    text: 'Get Out of Kaidi Kottai Free',
-    effect: { kind: 'pardon' },
-  },
-  {
-    text: 'Go directly to Kaidi Kottai, do not pass Rajyabhishekam and do not collect ₹2,00,000',
-    effect: { kind: 'detention' },
-  },
-  {
-    text: 'Festival fund matures, receive ₹1,00,000',
-    effect: { kind: 'collect', amount: 100000 },
-  },
-  {
-    text: 'Tax refund from the royal court, collect ₹20,000',
-    effect: { kind: 'collect', amount: 20000 },
-  },
-  {
-    text: 'It is your birthday, collect ₹10,000 from every player',
-    effect: { kind: 'collect-each', amount: 10000 },
-  },
-  {
-    text: 'Life insurance matures, collect ₹1,00,000',
-    effect: { kind: 'collect', amount: 100000 },
-  },
-  {
-    text: 'Pay hospital fees of ₹1,00,000',
-    effect: { kind: 'pay', amount: 100000 },
-  },
-  {
-    text: 'Pay gurukul (school) fees of ₹50,000',
-    effect: { kind: 'pay', amount: 50000 },
-  },
-  {
-    text: 'Receive a ₹25,000 consultancy fee',
-    effect: { kind: 'collect', amount: 25000 },
-  },
-  {
-    text: 'You are assessed for street repair, ₹40,000 per house and ₹1,15,000 per hotel',
-    effect: { kind: 'repairs', perHouse: 40000, perHotel: 115000 },
-  },
-  {
-    text: 'You have won second prize in a beauty contest, collect ₹10,000',
-    effect: { kind: 'collect', amount: 10000 },
-  },
-  {
-    text: 'You inherit ₹1,00,000',
-    effect: { kind: 'collect', amount: 100000 },
-  },
-];
-
-// How long a drawn card stays on screen before its effect is applied.
-const CARD_DISPLAY_DURATION = 3000;
-
-// 40-space board data following the approved specification
-const spaces = [
-  // Position 0 - Corner (Start)
-  {
-    id: 0,
-    name: 'Rajyabhi shekam',
-    subname: '(Coronation)',
-    type: 'start',
-    icon: '♛',
-  },
-
-  // Bottom row: positions 1-9 (left to right visually, but rendered right-to-left)
-  {
-    id: 1,
-    name: 'Pallava Path',
-    type: 'property',
-    colorGroup: 'maroon',
-    price: 60000,
-  },
-  {
-    id: 2,
-    name: 'Temple Hundi',
-    type: 'community',
-    icon: '✦',
-  },
-  {
-    id: 3,
-    name: 'Satavahana Street',
-    type: 'property',
-    colorGroup: 'maroon',
-    price: 60000,
-  },
-  {
-    id: 4,
-    name: 'Kandayam',
-    subname: '(Land Tax)',
-    type: 'tax',
-    icon: '₹',
-  },
-  {
-    id: 5,
-    name: 'Pallavan Superfast Express',
-    type: 'route',
-    price: 200000,
-  },
-  {
-    id: 6,
-    name: 'Chera Road',
-    type: 'property',
-    colorGroup: 'peacock',
-    price: 100000,
-  },
-  {
-    id: 7,
-    name: "Raja's Order",
-    type: 'chance',
-    icon: '✧',
-  },
-  {
-    id: 8,
-    name: 'Hoysala Halebidu Marg',
-    type: 'property',
-    colorGroup: 'peacock',
-    price: 100000,
-  },
-  {
-    id: 9,
-    name: 'Pandya Madurai Street',
-    type: 'property',
-    colorGroup: 'peacock',
-    price: 120000,
-  },
-
-  // Position 10 - Corner
-  {
-    id: 10,
-    name: 'Kaidi Kottai',
-    subname: 'Just Visiting',
-    type: 'detention',
-    icon: '♜',
-  },
-
-  // Left column: positions 11-19 (bottom to top)
-  {
-    id: 11,
-    name: 'Wodeyar Mysuru Place',
-    type: 'property',
-    colorGroup: 'rose',
-    price: 140000,
-  },
-  {
-    id: 12,
-    name: 'Kaveri Power Company',
-    type: 'utility',
-    price: 150000,
-  },
-  {
-    id: 13,
-    name: 'Travancore Avenue',
-    type: 'property',
-    colorGroup: 'rose',
-    price: 140000,
-  },
-  {
-    id: 14,
-    name: 'Nayak Madurai Mahal Road',
-    type: 'property',
-    colorGroup: 'rose',
-    price: 160000,
-  },
-  {
-    id: 15,
-    name: 'The Farakka Express',
-    type: 'route',
-    price: 200000,
-  },
-  {
-    id: 16,
-    name: 'Kakatiya Warangal Place',
-    type: 'property',
-    colorGroup: 'saffron',
-    price: 180000,
-  },
-  {
-    id: 17,
-    name: 'Temple Hundi',
-    type: 'community',
-    icon: '✦',
-  },
-  {
-    id: 18,
-    name: 'Golconda Fort Avenue',
-    type: 'property',
-    colorGroup: 'saffron',
-    price: 180000,
-  },
-  {
-    id: 19,
-    name: 'Chola Thanjavur Avenue',
-    type: 'property',
-    colorGroup: 'saffron',
-    price: 200000,
-  },
-
-  // Position 20 - Corner
-  {
-    id: 20,
-    name: 'Ambari Vishram',
-    subname: '(Free Parking)',
-    type: 'parking',
-    icon: '◆',
-  },
-
-  // Top row: positions 21-29 (left to right)
-  {
-    id: 21,
-    name: 'Krishnadevaraya Hampi Avenue',
-    type: 'property',
-    colorGroup: 'kumkum',
-    price: 220000,
-  },
-  {
-    id: 22,
-    name: "Raja's Order",
-    type: 'chance',
-    icon: '✧',
-  },
-  {
-    id: 23,
-    name: 'Rajaraja Chola Avenue',
-    type: 'property',
-    colorGroup: 'kumkum',
-    price: 220000,
-  },
-  {
-    id: 24,
-    name: 'Rani Abbakka Avenue',
-    type: 'property',
-    colorGroup: 'kumkum',
-    price: 240000,
-  },
-  {
-    id: 25,
-    name: 'Pallavan Superfast Express',
-    type: 'route',
-    price: 200000,
-  },
-  {
-    id: 26,
-    name: 'Tipu Sultan Avenue',
-    type: 'property',
-    colorGroup: 'turmeric',
-    price: 260000,
-  },
-  {
-    id: 27,
-    name: 'Chandragiri Avenue',
-    type: 'property',
-    colorGroup: 'turmeric',
-    price: 260000,
-  },
-  {
-    id: 28,
-    name: 'Tungabhadra Water Works',
-    type: 'utility',
-    price: 150000,
-  },
-  {
-    id: 29,
-    name: 'Chalukya Badami Gardens',
-    type: 'property',
-    colorGroup: 'turmeric',
-    price: 280000,
-  },
-
-  // Position 30 - Corner
-  {
-    id: 30,
-    name: 'Go to Kaidi Kottai',
-    type: 'go-to-detention',
-    icon: '⚠',
-  },
-
-  // Right column: positions 31-39 (top to bottom)
-  {
-    id: 31,
-    name: 'Padmapuram Avenue',
-    type: 'property',
-    colorGroup: 'emerald',
-    price: 300000,
-  },
-  {
-    id: 32,
-    name: 'Vijayanagara Empire Avenue',
-    type: 'property',
-    colorGroup: 'emerald',
-    price: 300000,
-  },
-  {
-    id: 33,
-    name: 'Temple Hundi',
-    type: 'community',
-    icon: '✦',
-  },
-  {
-    id: 34,
-    name: 'Mysore Palace Avenue',
-    type: 'property',
-    colorGroup: 'emerald',
-    price: 320000,
-  },
-  {
-    id: 35,
-    name: 'The Farakka Express',
-    type: 'route',
-    price: 200000,
-  },
-  {
-    id: 36,
-    name: "Raja's Order",
-    type: 'chance',
-    icon: '✧',
-  },
-  {
-    id: 37,
-    name: 'Meenakshi Amman Place',
-    type: 'property',
-    colorGroup: 'indigo',
-    price: 350000,
-  },
-  {
-    id: 38,
-    name: 'Vajra (Diamond) Tax',
-    type: 'tax',
-    icon: '₹',
-  },
-  {
-    id: 39,
-    name: 'Brihadeeswara Boulevard',
-    type: 'property',
-    colorGroup: 'indigo',
-    price: 400000,
-  },
-];
-
-// Grid coordinates for 40-space square board (11x11 grid)
-// Corners at: [1,11], [11,11], [11,1], [1,1]
-// Each side has 9 regular spaces between corners
-const gridCoordinates = [
-  // Position 0: Bottom-right corner
-  [11, 11],
-
-  // Positions 1-9: Bottom row, moving left
-  [10, 11],
-  [9, 11],
-  [8, 11],
-  [7, 11],
-  [6, 11],
-  [5, 11],
-  [4, 11],
-  [3, 11],
-  [2, 11],
-
-  // Position 10: Bottom-left corner
-  [1, 11],
-
-  // Positions 11-19: Left column, moving up
-  [1, 10],
-  [1, 9],
-  [1, 8],
-  [1, 7],
-  [1, 6],
-  [1, 5],
-  [1, 4],
-  [1, 3],
-  [1, 2],
-
-  // Position 20: Top-left corner
-  [1, 1],
-
-  // Positions 21-29: Top row, moving right
-  [2, 1],
-  [3, 1],
-  [4, 1],
-  [5, 1],
-  [6, 1],
-  [7, 1],
-  [8, 1],
-  [9, 1],
-  [10, 1],
-
-  // Position 30: Top-right corner
-  [11, 1],
-
-  // Positions 31-39: Right column, moving down
-  [11, 2],
-  [11, 3],
-  [11, 4],
-  [11, 5],
-  [11, 6],
-  [11, 7],
-  [11, 8],
-  [11, 9],
-  [11, 10],
-];
-
-// Read only views of the board for the landing page, which draws its preview
-// and district guide straight from the game data.
-export { spaces as BOARD_SPACES, gridCoordinates as BOARD_GRID, STARTING_BALANCE };
-
-// buildPlayers is called inside the component with the actual props.
-const buildPlayers = (hostPiece, playerCount) => {
-  const pieceOrder = seatPieces(hostPiece, playerCount);
-  return pieceOrder.map((pieceKey, index) => {
-    const piece = PIECES[pieceKey];
-    return {
-      id: `p${index + 1}`,
-      name: index === 0 ? 'You' : `Player ${index + 1}`,
-      color: piece.colour,
-      pieceKey,
-    };
-  });
-};
-
-// Helper function to get space CSS classes
-const getSpaceClass = (space) => {
-  const typeClasses = {
-    start: 'board-space--start',
-    property: 'board-space--property',
-    community: 'board-space--community',
-    chance: 'board-space--chance',
-    tax: 'board-space--tax',
-    route: 'board-space--route',
-    utility: 'board-space--utility',
-    detention: 'board-space--detention',
-    parking: 'board-space--parking',
-    'go-to-detention': 'board-space--go-to-detention',
-  };
-
-  const colorGroupClass = space.colorGroup
-    ? `board-space--${space.colorGroup}`
-    : '';
-
-  return `${typeClasses[space.type] || ''} ${colorGroupClass}`;
-};
-
-// Format currency for display
-const formatCurrency = (amount) => {
-  return `₹${(amount / 1000).toLocaleString()}K`;
-};
-
-// Full rupee amount in Indian lakh grouping, e.g. 200000 -> ₹2,00,000
-const formatRupees = (amount) => `₹${amount.toLocaleString('en-IN')}`;
-
-// Pip positions for each die face on a 100 unit square.
 const PIP_LAYOUT = {
   1: [[50, 50]],
   2: [[28, 28], [72, 72]],
@@ -650,7 +49,6 @@ const PIP_LAYOUT = {
   6: [[28, 26], [72, 26], [28, 50], [72, 50], [28, 74], [72, 74]],
 };
 
-// One die drawn with pips, or a blank resting face before the first roll.
 function DieFace({ value }) {
   return (
     <svg className={`die-face ${value ? '' : 'die-face--idle'}`} viewBox="0 0 100 100" aria-hidden="true">
@@ -662,881 +60,683 @@ function DieFace({ value }) {
   );
 }
 
-export default function BoardGame({ onExit, playerCount = 2, hostPiece = 'lamp', isMusicEnabled = false, onMusicToggle }) {
-  const players = useMemo(
-    () => buildPlayers(hostPiece, playerCount),
-    [hostPiece, playerCount],
-  );
+// Automated tests on the local transport can run a match at high speed.
+const testTiming = () => {
+  if (transportKind() !== 'local' || !window.location.search.includes('speed=fast')) {
+    return {};
+  }
 
-  // Initialize state maps with dynamic player IDs
-  const initialPositions = useMemo(
-    () => Object.fromEntries(players.map((p) => [p.id, 0])),
-    [players],
+  return Object.fromEntries(
+    Object.entries(DEFAULT_TIMING).map(([key, value]) => [key, key === 'auction' ? 1500 : Math.round(value * 0.04)]),
   );
-  const initialBalances = useMemo(
-    () => Object.fromEntries(players.map((p) => [p.id, STARTING_BALANCE])),
-    [players],
-  );
-  const initialDoublesCount = useMemo(
-    () => Object.fromEntries(players.map((p) => [p.id, 0])),
-    [players],
-  );
-  const initialPardons = useMemo(
-    () => Object.fromEntries(players.map((p) => [p.id, 0])),
-    [players],
-  );
+};
 
-  const [positions, setPositions] = useState(initialPositions);
-  const [balances, setBalances] = useState(initialBalances);
-  const [turnCount, setTurnCount] = useState(0);
+const kindLabel = (player) => {
+  if (player.kind === 'bot') return 'Computer opponent';
+  if (player.kind === 'ai') return 'AI opponent';
+  return player.clientId ? 'Player' : 'Host';
+};
 
-  // Active seat is derived purely from completed turn count and table size
-  const activePlayerIndex = useMemo(
-    () => activeSeatForTurn(turnCount, players.length),
-    [turnCount, players.length],
-  );
-  const [dice1, setDice1] = useState(null);
-  const [dice2, setDice2] = useState(null);
-  const [isRolling, setIsRolling] = useState(false);
-  const [isMoving, setIsMoving] = useState(false);
-  const [selectedProperty, setSelectedProperty] = useState(null);
-  const [showDiceInfo, setShowDiceInfo] = useState(false);
-  const [showMatchInfo, setShowMatchInfo] = useState(false);
-  const [gameOver, setGameOver] = useState(false);
-  const [activityText, setActivityText] = useState(
-    'Your journey begins at Rajyabhishekam\nRoll the royal dice to begin',
-  );
-  const [doublesCount, setDoublesCount] = useState(initialDoublesCount);
-  // Unused Get Out of Kaidi Kottai Free cards, held until detention rules land.
-  const [pardons, setPardons] = useState(initialPardons);
-  // The card currently face-up on screen, or null.
-  const [drawnCard, setDrawnCard] = useState(null);
-  // deeds: map of spaceId -> { owner: 'p1', houses: 0, hotel: false, mortgaged: false }
-  const [deeds, setDeeds] = useState({});
-  // Purchase offer modal: { playerId, spaceId, resolve }
-  const [purchaseOffer, setPurchaseOffer] = useState(null);
-  // Raise funds / insolvency modal: { playerId, debt, creditor, resolve }
-  // eslint-disable-next-line no-unused-vars
-  const [raiseFunds, setRaiseFunds] = useState(null);
+// Seconds left on the auction clock, ticking locally between snapshots.
+function useCountdown(endsAt) {
+  const [now, setNow] = useState(Date.now());
 
-  const movementInProgressRef = useRef(false);
-  // Positions mirrored in a ref: the turn handlers read a player's position
-  // across `await` boundaries, where a state value captured by the closure
-  // would be stale by the time a card moves the token again.
-  const positionsRef = useRef(Object.fromEntries(players.map(p => [p.id, 0])));
-  // Audio system with actual sound effects
-  const audioRefs = useRef({
-    coronation: new Audio(coronationSound),
-    pallavanExpress: new Audio(pallavanExpressSound),
-    farakkaExpress: new Audio(farakkaExpressSound),
-    propertyBought: new Audio(propertyBoughtSound),
-    utility: new Audio(utilitySound),
-    winner: new Audio(winnerSound),
+  useEffect(() => {
+    if (!endsAt) {
+      return undefined;
+    }
+
+    const timer = setInterval(() => setNow(Date.now()), 100);
+    return () => clearInterval(timer);
+  }, [endsAt]);
+
+  return endsAt ? Math.max(0, endsAt - now) : 0;
+}
+
+export default function BoardGame({
+  players: seatPlayers,
+  myPlayerId,
+  session,
+  soundEnabled = false,
+  onMusicToggle,
+  onExit,
+  onRestart,
+}) {
+  const isHost = !session || session.isHost;
+  const [state, setState] = useState(() => {
+    const cached = !isHost && session?.lastGame;
+    return cached ? cached.state : createInitialState(seatPlayers);
   });
+  const [clockOffset, setClockOffset] = useState(0);
+  const [selectedProperty, setSelectedProperty] = useState(null);
+  const [sheet, setSheet] = useState(null); // 'dice' | 'match' | null
+  const [showResults, setShowResults] = useState(true);
+  const engineRef = useRef(null);
 
-  const playSound = useCallback((soundKey) => {
-    const audio = audioRefs.current[soundKey];
+  // ------------------------------------------------------------- engine
+
+  useEffect(() => {
+    if (!isHost) {
+      return undefined;
+    }
+
+    const engine = new GameEngine({
+      players: seatPlayers,
+      advisor: premiumAdvisor,
+      timing: testTiming(),
+      onChange: (next) => {
+        setState(next);
+        session?.broadcastGame(next);
+      },
+      onChat: ({ playerId, text }) => {
+        if (!session) return;
+        const player = engine.player(playerId);
+
+        if (player) {
+          session.postAs(player.name, player.pieceKey, text);
+        } else {
+          session.postSystem(text);
+        }
+      },
+    });
+
+    engineRef.current = engine;
+    engine.start();
+
+    const offIntent = session?.on('intent', ({ clientId, action }) => {
+      const player = engine.state.players.find((entry) => entry.clientId === clientId);
+
+      if (!player) {
+        return;
+      }
+
+      switch (action.type) {
+        case 'roll':
+          engine.playTurn(player.id);
+          break;
+        case 'purchase':
+          engine.resolvePurchase(player.id, action.accept);
+          break;
+        case 'bid':
+          engine.placeBid(player.id, action.amount);
+          break;
+        case 'manage':
+          engine.manageProperty(player.id, Number(action.spaceId), action.action);
+          break;
+        default:
+          break;
+      }
+    });
+
+    const offLeft = session?.on('peer-left', (clientId) => {
+      const player = engine.state.players.find((entry) => entry.clientId === clientId);
+
+      if (player) {
+        engine.replaceWithBot(player.id);
+      }
+    });
+
+    return () => {
+      offIntent?.();
+      offLeft?.();
+      engine.destroy();
+      engineRef.current = null;
+    };
+  }, [isHost, seatPlayers, session]);
+
+  // Guests mirror the host's snapshots.
+  useEffect(() => {
+    if (isHost || !session) {
+      return undefined;
+    }
+
+    return session.on('game', ({ state: next, sentAt }) => {
+      setState((current) => (next.version >= current.version ? next : current));
+      setClockOffset(Date.now() - sentAt);
+    });
+  }, [isHost, session]);
+
+  // One way to act, whether the rules run here or on the host.
+  const act = useCallback(
+    (action) => {
+      const engine = engineRef.current;
+
+      if (!isHost) {
+        session?.sendIntent(action);
+        return;
+      }
+
+      if (!engine) return;
+
+      switch (action.type) {
+        case 'roll':
+          engine.playTurn(myPlayerId);
+          break;
+        case 'purchase':
+          engine.resolvePurchase(myPlayerId, action.accept);
+          break;
+        case 'bid':
+          engine.placeBid(myPlayerId, action.amount);
+          break;
+        case 'manage':
+          engine.manageProperty(myPlayerId, action.spaceId, action.action);
+          break;
+        default:
+          break;
+      }
+    },
+    [isHost, myPlayerId, session],
+  );
+
+  // -------------------------------------------------------------- sound
+
+  // Every effect sound goes through this gate, so the speaker button in the
+  // top bar silences buying, express, coronation and winner sounds as well as
+  // the music.
+  const soundOnRef = useRef(soundEnabled);
+  const audioRef = useRef(null);
+
+  if (!audioRef.current) {
+    audioRef.current = Object.fromEntries(
+      Object.entries(SOUND_FILES).map(([key, file]) => {
+        const audio = new Audio(file);
+        audio.preload = 'auto';
+        return [key, audio];
+      }),
+    );
+  }
+
+  useEffect(() => {
+    soundOnRef.current = soundEnabled;
+
+    if (!soundEnabled) {
+      Object.values(audioRef.current).forEach((audio) => audio.pause());
+    }
+  }, [soundEnabled]);
+
+  useEffect(() => {
+    const audios = audioRef.current;
+    return () => Object.values(audios).forEach((audio) => audio.pause());
+  }, []);
+
+  const lastSfx = useRef(state.sfx?.id ?? 0);
+
+  useEffect(() => {
+    const sfx = state.sfx;
+
+    if (!sfx || sfx.id === lastSfx.current) {
+      return;
+    }
+
+    lastSfx.current = sfx.id;
+
+    if (!soundOnRef.current) {
+      return;
+    }
+
+    const audio = audioRef.current[sfx.key];
+
     if (audio) {
       audio.currentTime = 0;
-      audio.play().catch(err => console.log('[Audio] Play prevented:', err));
+      audio.play().catch(() => {});
     }
-  }, []);
+  }, [state.sfx]);
 
-  const audioHooksRef = useRef({
-    diceRoll: () => console.log('[Audio Hook] diceRoll'),
-    tokenStep: () => console.log('[Audio Hook] tokenStep'),
-    routeLand: (spaceId) => {
-      const space = spaces[spaceId];
-      if (space && space.name) {
-        if (space.name.includes('Pallavan')) {
-          playSound('pallavanExpress');
-        } else if (space.name.includes('Farakka')) {
-          playSound('farakkaExpress');
-        }
+  // ------------------------------------------------------------ keyboard
+
+  useEffect(() => {
+    const onKey = (event) => {
+      if (event.key === 'Escape') {
+        setSelectedProperty(null);
+        setSheet(null);
       }
-    },
-    utilityLand: () => playSound('utility'),
-    passStart: () => playSound('coronation'),
-    cardDraw: () => console.log('[Audio Hook] cardDraw'),
-    propertyBought: () => playSound('propertyBought'),
-    winner: () => playSound('winner'),
-  });
+    };
 
-  // Every position write goes through here so the ref and the rendered state
-  // never disagree.
-  const setPlayerPosition = useCallback((playerId, position) => {
-    positionsRef.current = { ...positionsRef.current, [playerId]: position };
-    setPositions((prev) => ({ ...prev, [playerId]: position }));
+    window.addEventListener('keydown', onKey);
+    return () => window.removeEventListener('keydown', onKey);
   }, []);
 
-  // Single source of truth for the global completed-turn count.
-  // Called once per fully resolved player turn; returns true when the match is over.
-  const commitTurn = useCallback(() => {
-    let matchEnded = false;
-    setTurnCount((prev) => {
-      const newCount = prev + 1;
-      matchEnded = newCount >= TOTAL_MATCH_TURNS;
-      if (matchEnded) {
-        setGameOver(true);
-        audioHooksRef.current.winner();
-      }
-      return newCount;
-    });
-    return matchEnded;
-  }, []);
+  // ------------------------------------------------------------ derived
 
-  const activePlayer = players[activePlayerIndex];
+  const players = state.players;
+  const activePlayer = players[state.activeIndex];
+  const me = players.find((player) => player.id === myPlayerId);
+  const amAlive = me && !state.bankrupt[me.id];
+  const isMyTurn = activePlayer?.id === myPlayerId;
+  const canRoll = isMyTurn && amAlive && !state.busy && !state.gameOver;
 
-  const playerPositions = useMemo(
+  const netWorths = useMemo(
     () =>
-      players.reduce((result, player) => {
-        result[player.id] = positions[player.id];
-        return result;
-      }, {}),
-    [positions, players],
+      Object.fromEntries(
+        players.map((player) => [
+          player.id,
+          state.bankrupt[player.id] ? 0 : Estate.netWorth(player.id, state.balances, state.deeds, BOARD_SPACES),
+        ]),
+      ),
+    [players, state.balances, state.deeds, state.bankrupt],
   );
 
-  // Cash-only winner until property mechanics exist
-  const matchResult = useMemo(() => calculateWinner(balances, players), [
-    balances,
-    players,
-  ]);
+  const auctionEndsAt = state.auction ? state.auction.endsAt + (isHost ? 0 : clockOffset) : 0;
+  const auctionLeft = useCountdown(auctionEndsAt);
 
-  // Step-by-step movement with start detection. Every card-driven move runs
-  // through here too, so a token never teleports across the board.
-  const movePlayerStepByStep = useCallback(
-    async (playerId, totalSteps, { backwards = false } = {}) => {
-      return new Promise((resolve) => {
-        let currentStep = 0;
-        let passedStart = false;
-        const startPosition = positionsRef.current[playerId];
+  useEffect(() => {
+    if (state.gameOver) {
+      setShowResults(true);
+    }
+  }, [state.gameOver]);
 
-        const moveOneStep = () => {
-          if (currentStep >= totalSteps) {
-            resolve(passedStart);
-            return;
-          }
+  const ownerOf = (spaceId) => {
+    const deed = state.deeds[spaceId];
+    return deed ? players.find((player) => player.id === deed.owner) : null;
+  };
 
-          currentStep++;
-          const offset = backwards ? -currentStep : currentStep;
-          const newPosition =
-            (startPosition + offset + spaces.length) % spaces.length;
+  // --------------------------------------------------------------- render
 
-          // Reaching start counts as a crossing. Moving backwards over it
-          // never does — you cannot collect by retreating.
-          if (newPosition === START_SPACE && !backwards) {
-            passedStart = true;
-          }
+  const renderPurchaseOffer = () => {
+    const offer = state.purchaseOffer;
 
-          setPlayerPosition(playerId, newPosition);
+    if (!offer || offer.playerId !== myPlayerId) {
+      return null;
+    }
 
-          // Play movement audio hook
-          audioHooksRef.current.tokenStep();
+    const space = BOARD_SPACES[offer.spaceId];
+    const balance = state.balances[myPlayerId];
+    const canAfford = balance >= space.price;
+    const accent = space.colorGroup ? `var(--color-${space.colorGroup})` : space.type === 'route' ? '#2f6170' : '#a46f17';
 
-          setTimeout(moveOneStep, MOVEMENT_STEP_DURATION);
-        };
+    return (
+      <div className="drawn-card-overlay">
+        <div className="property-card purchase-offer" role="dialog" aria-labelledby="purchase-offer-title">
+          <header className="property-card-header">
+            <div className="property-card-color-bar" style={{ background: accent }} />
+            <p className="property-card-kicker">For sale</p>
+            <h3 id="purchase-offer-title">{space.name}</h3>
+          </header>
 
-        moveOneStep();
-      });
-    },
-    [setPlayerPosition],
-  );
+          <div className="property-card-body">
+            <div className="property-card-row">
+              <span>Price</span>
+              <strong className={canAfford ? 'amount-positive' : 'amount-negative'}>{formatRupees(space.price)}</strong>
+            </div>
+            <div className="property-card-row">
+              <span>Your balance</span>
+              <span>{formatRupees(balance)}</span>
+            </div>
+            <div className="property-card-row">
+              <span>{canAfford ? 'Balance after buying' : 'Shortfall'}</span>
+              <span className={canAfford ? '' : 'amount-negative'}>{formatRupees(Math.abs(balance - space.price))}</span>
+            </div>
 
-  // Walk a player forward to a specific space, one space at a time.
-  const movePlayerToSpace = useCallback(
-    async (playerId, targetSpace) => {
-      const from = positionsRef.current[playerId];
-      const steps = (targetSpace - from + spaces.length) % spaces.length;
+            <p className="property-card-note">
+              If you decline, {space.name} goes to auction and every player, you included, can bid for it
+            </p>
 
-      if (steps === 0) return false;
-
-      return movePlayerStepByStep(playerId, steps);
-    },
-    [movePlayerStepByStep],
-  );
-
-  // The next space of a given kind strictly ahead of the player's position.
-  const nextSpaceAhead = useCallback((playerId, candidates) => {
-    const from = positionsRef.current[playerId];
-
-    // Distance travelling forward only. Standing on a candidate means the next
-    // one of its kind is a full lap away, not zero steps away.
-    const distanceTo = (space) => {
-      const gap = (space - from + spaces.length) % spaces.length;
-      return gap === 0 ? spaces.length : gap;
-    };
-
-    return candidates.reduce((nearest, candidate) =>
-      distanceTo(candidate) < distanceTo(nearest) ? candidate : nearest,
+            <div className="purchase-offer-actions">
+              <GoldButton onClick={() => act({ type: 'purchase', accept: true })} disabled={!canAfford}>
+                Buy property
+              </GoldButton>
+              <GoldButton variant="ghost" onClick={() => act({ type: 'purchase', accept: false })}>
+                Decline
+              </GoldButton>
+            </div>
+          </div>
+        </div>
+      </div>
     );
-  }, []);
+  };
 
-  // Award start reward when passing or landing on start
-  const awardStartReward = useCallback((playerId, didPassStart) => {
-    if (didPassStart) {
-      setBalances((prev) => ({
-        ...prev,
-        [playerId]: prev[playerId] + START_REWARD,
-      }));
-      audioHooksRef.current.passStart();
-      return true;
-    }
-    return false;
-  }, []);
+  const renderAuction = () => {
+    const auction = state.auction;
 
-  // Move cash between the bank and one player.
-  const adjustBalance = useCallback((playerId, delta) => {
-    setBalances((prev) => ({
-      ...prev,
-      [playerId]: prev[playerId] + delta,
-    }));
-  }, []);
-
-  // Transfer cash between two players (or bank via null)
-  const transferCash = useCallback((from, to, amount) => {
-    setBalances((prev) => ({
-      ...prev,
-      [from]: prev[from] - amount,
-      [to]: prev[to] + amount,
-    }));
-  }, []);
-
-  // Offer purchase to human player - returns Promise that resolves when answered
-  const offerPurchase = useCallback((playerId, spaceId) => {
-    return new Promise((resolve) => {
-      setPurchaseOffer({ playerId, spaceId, resolve });
-    });
-  }, []);
-
-  // Handle purchase decision from modal
-  const handlePurchaseDecision = useCallback((accept) => {
-    if (!purchaseOffer) return;
-
-    const { playerId, spaceId, resolve } = purchaseOffer;
-    const space = spaces[spaceId];
-
-    if (accept && balances[playerId] >= space.price) {
-      setBalances((prev) => ({ ...prev, [playerId]: prev[playerId] - space.price }));
-      setDeeds((prev) => ({
-        ...prev,
-        [spaceId]: { owner: playerId, houses: 0, hotel: false, mortgaged: false }
-      }));
-      // Play property bought sound
-      audioHooksRef.current.propertyBought();
+    if (!auction) {
+      return null;
     }
 
-    setPurchaseOffer(null);
-    resolve();
-  }, [purchaseOffer, balances]);
+    const space = BOARD_SPACES[auction.spaceId];
+    const leader = players.find((player) => player.id === auction.highBidder);
+    const myBalance = state.balances[myPlayerId] ?? 0;
+    const minimum = auction.highBid === 0 ? AUCTION_MIN_BID : auction.highBid + AUCTION_INCREMENT;
+    const iLead = auction.highBidder === myPlayerId;
+    const seconds = Math.ceil(auctionLeft / 1000);
+    const steps = [
+      { label: `Bid ${formatCurrency(minimum)}`, amount: minimum },
+      { label: '+ ₹50K', amount: Math.max(minimum, auction.highBid + 50000) },
+      { label: '+ ₹1L', amount: Math.max(minimum, auction.highBid + 100000) },
+    ];
+    const accent = space.colorGroup ? `var(--color-${space.colorGroup})` : space.type === 'route' ? '#2f6170' : '#a46f17';
 
-  // AI purchase logic - naive: buy if affordable
-  const aiDecidePurchase = useCallback((playerId, space) => {
-    if (balances[playerId] >= space.price) {
-      setBalances((prev) => ({ ...prev, [playerId]: prev[playerId] - space.price }));
-      setDeeds((prev) => ({
-        ...prev,
-        [space.id]: { owner: playerId, houses: 0, hotel: false, mortgaged: false }
-      }));
-      // Play property bought sound
-      audioHooksRef.current.propertyBought();
-    }
-  }, [balances]);
+    return (
+      <div className="drawn-card-overlay auction-overlay">
+        <div className="property-card auction-sheet" role="dialog" aria-labelledby="auction-title">
+          <header className="property-card-header">
+            <div className="property-card-color-bar" style={{ background: accent }} />
+            <p className="property-card-kicker">Auction · listed at {formatRupees(space.price)}</p>
+            <h3 id="auction-title">{space.name}</h3>
+            <span className={`auction-clock ${seconds <= 3 ? 'auction-clock--urgent' : ''}`} aria-live="polite">
+              {seconds}s
+            </span>
+          </header>
 
-  // Handle insolvency - returns Promise that resolves when debt is paid or bankruptcy declared
-  const handleInsolvency = useCallback(async (playerId, debt, creditor) => {
-    const liquidatable = Estate.liquidatableValue(playerId, deeds, spaces);
+          <div className="auction-timer" aria-hidden="true">
+            <span style={{ transform: `scaleX(${Math.min(1, auctionLeft / 12000)})` }} />
+          </div>
 
-    if (balances[playerId] + liquidatable < debt) {
-      // Bankruptcy - return all deeds to bank
-      const playerDeeds = Object.entries(deeds).filter(([, deed]) => deed.owner === playerId);
-      setDeeds((prev) => {
-        const next = { ...prev };
-        playerDeeds.forEach(([spaceId]) => {
-          delete next[spaceId];
-        });
-        return next;
-      });
-      setBalances((prev) => ({ ...prev, [playerId]: 0 }));
-      return;
-    }
+          <div className="property-card-body">
+            <div className="auction-lead">
+              <span>Highest bid</span>
+              <strong key={auction.highBid} className="auction-amount">
+                {auction.highBid ? formatRupees(auction.highBid) : 'No bids yet'}
+              </strong>
+              <span className="auction-leader">
+                {leader ? `${leader.id === myPlayerId ? 'You lead' : `${leader.name} leads`}` : `Opening bid ${formatRupees(AUCTION_MIN_BID)}`}
+              </span>
+            </div>
 
-    // Open raise-funds modal for human player
-    if (playerId === 'p1') {
-      return new Promise((resolve) => {
-        setRaiseFunds({ playerId, debt, creditor, resolve });
-      });
-    }
+            {auction.bids.length > 0 && (
+              <ol className="auction-bids">
+                {[...auction.bids].reverse().map((bid, index) => {
+                  const bidder = players.find((player) => player.id === bid.playerId);
+                  return (
+                    <li key={`${bid.playerId}-${bid.amount}-${index}`}>
+                      <span style={{ color: PIECES[bidder?.pieceKey]?.colour }}>{bidder?.name}</span>
+                      <span>{formatRupees(bid.amount)}</span>
+                    </li>
+                  );
+                })}
+              </ol>
+            )}
 
-    // AI liquidation - naive: sell buildings first, then mortgage
-    let currentCash = balances[playerId];
-    const updatedDeeds = { ...deeds };
+            {amAlive ? (
+              <div className="auction-actions">
+                {steps.map((step) => (
+                  <button
+                    key={step.label}
+                    type="button"
+                    className="auction-bid-button"
+                    disabled={iLead || step.amount > myBalance || auctionLeft <= 0}
+                    onClick={() => act({ type: 'bid', amount: step.amount })}
+                  >
+                    {step.label}
+                  </button>
+                ))}
+              </div>
+            ) : (
+              <p className="property-card-note">You are watching this auction</p>
+            )}
 
-    while (currentCash < debt) {
-      // Try selling a building
-      const buildingSpace = Object.keys(updatedDeeds).find(
-        (spaceId) =>
-          updatedDeeds[spaceId].owner === playerId &&
-          Estate.canSellBuilding(updatedDeeds, spaceId, spaces)
-      );
+            <p className="auction-hint">
+              {iLead
+                ? 'You hold the top bid, hold your nerve'
+                : `Your cash ${formatRupees(myBalance)} · late bids add a few seconds`}
+            </p>
+          </div>
+        </div>
+      </div>
+    );
+  };
 
-      if (buildingSpace) {
-        const result = Estate.sellOneBuilding(updatedDeeds, buildingSpace, spaces);
-        Object.assign(updatedDeeds, result.updatedDeeds);
-        currentCash += result.cash;
-        continue;
-      }
-
-      // Try mortgaging
-      const mortgageSpace = Object.keys(updatedDeeds).find(
-        (spaceId) =>
-          updatedDeeds[spaceId].owner === playerId &&
-          Estate.canMortgage(updatedDeeds, spaceId, spaces)
-      );
-
-      if (mortgageSpace) {
-        const value = Estate.mortgageValue(mortgageSpace, spaces);
-        updatedDeeds[mortgageSpace] = { ...updatedDeeds[mortgageSpace], mortgaged: true };
-        currentCash += value;
-        continue;
-      }
-
-      break;
-    }
-
-    setDeeds(updatedDeeds);
-    setBalances((prev) => ({
-      ...prev,
-      [playerId]: currentCash - debt,
-      [creditor]: prev[creditor] + debt,
-    }));
-  }, [balances, deeds]);
-
-  // Lets the resolver below call itself for the one card that can land a token
-  // on another card space.
-  const resolveDrawnCardRef = useRef(null);
-
-  // Draw a card, hold it on screen, then apply its effect. Returns a sentence
-  // describing what actually happened for the activity log. Called as part of
-  // destination resolution, so the caller still commits exactly one turn.
-  const resolveDrawnCard = useCallback(
-    async (playerId, deckName, deck) => {
-      const card = drawCard(deck);
-      const player = players.find((entry) => entry.id === playerId);
-      const opponents = players.filter((entry) => entry.id !== playerId);
-      const isHost = playerId === 'p1';
-      const subject = isHost ? 'You' : player.name;
-      const possessive = isHost ? 'your' : `${player.name}'s`;
-
-      audioHooksRef.current.cardDraw();
-      setDrawnCard({ deckName, text: card.text, playerName: player.name });
-
-      // The card sits face-up before anything moves or changes hands.
-      await new Promise((resolve) =>
-        setTimeout(resolve, CARD_DISPLAY_DURATION),
-      );
-      setDrawnCard(null);
-
-      const { effect } = card;
-
-      switch (effect.kind) {
-        case 'advance': {
-          setIsMoving(true);
-          const passed = await movePlayerToSpace(playerId, effect.target);
-          setIsMoving(false);
-
-          const awarded = awardStartReward(playerId, passed);
-          let message = `${subject} ${isHost ? 'advance' : 'advances'} to ${
-            spaces[effect.target].name
-          }`;
-          if (awarded) {
-            message += `\n${formatRupees(START_REWARD)} collected at Rajyabhishekam`;
-          }
-          return message;
-        }
-
-        case 'nearest-route':
-        case 'nearest-utility': {
-          const isRoute = effect.kind === 'nearest-route';
-          const target = nextSpaceAhead(
-            playerId,
-            isRoute ? ROUTE_SPACES : UTILITY_SPACES,
-          );
-
-          setIsMoving(true);
-          const passed = await movePlayerToSpace(playerId, target);
-          setIsMoving(false);
-
-          if (isRoute) audioHooksRef.current.routeLand();
-          const awarded = awardStartReward(playerId, passed);
-
-          let message = `${subject} ${isHost ? 'advance' : 'advances'} to ${
-            spaces[target].name
-          }`;
-          if (awarded) {
-            message += `\n${formatRupees(START_REWARD)} collected at Rajyabhishekam`;
-          }
-          message += '\nNo rent is charged when a card moves you here';
-          return message;
-        }
-
-        case 'back': {
-          setIsMoving(true);
-          await movePlayerStepByStep(playerId, effect.steps, {
-            backwards: true,
-          });
-          setIsMoving(false);
-
-          const landed = spaces[positionsRef.current[playerId]];
-          const message = `${subject} ${
-            isHost ? 'retreat' : 'retreats'
-          } ${effect.steps} spaces to ${landed.name}`;
-
-          // Retreating three from the last Raja's Order lands on Temple Hundi,
-          // which draws in turn. Only this card can do that, so the nesting
-          // stops one level deep.
-          if (landed.type === 'chance' || landed.type === 'community') {
-            const nested = await resolveDrawnCardRef.current(
-              playerId,
-              landed.name,
-              landed.type === 'chance' ? RAJAS_ORDER_DECK : TEMPLE_HUNDI_DECK,
-            );
-            return `${message}\n${nested}`;
-          }
-
-          return message;
-        }
-
-        case 'detention': {
-          setIsMoving(true);
-          await movePlayerToSpace(playerId, DETENTION_SPACE);
-          setIsMoving(false);
-
-          // Sent directly: no Rajyabhishekam reward, even though the token
-          // walks past it.
-          return `${subject} ${
-            isHost ? 'are' : 'is'
-          } sent straight to Kaidi Kottai\nNo Rajyabhishekam reward`;
-        }
-
-        case 'collect': {
-          adjustBalance(playerId, effect.amount);
-          return `${subject} ${isHost ? 'collect' : 'collects'} ${formatRupees(
-            effect.amount,
-          )}`;
-        }
-
-        case 'pay': {
-          adjustBalance(playerId, -effect.amount);
-          return `${subject} ${isHost ? 'pay' : 'pays'} ${formatRupees(
-            effect.amount,
-          )}`;
-        }
-
-        case 'pay-each': {
-          opponents.forEach((opponent) =>
-            adjustBalance(opponent.id, effect.amount),
-          );
-          adjustBalance(playerId, -effect.amount * opponents.length);
-
-          return `${subject} ${isHost ? 'pay' : 'pays'} ${formatRupees(
-            effect.amount,
-          )} to each of the other ${
-            opponents.length === 1 ? 'player' : 'players'
-          }, ${formatRupees(effect.amount * opponents.length)} in all`;
-        }
-
-        case 'collect-each': {
-          opponents.forEach((opponent) =>
-            adjustBalance(opponent.id, -effect.amount),
-          );
-          adjustBalance(playerId, effect.amount * opponents.length);
-
-          return `${subject} ${isHost ? 'collect' : 'collects'} ${formatRupees(
-            effect.amount,
-          )} from each of the other ${
-            opponents.length === 1 ? 'player' : 'players'
-          }, ${formatRupees(effect.amount * opponents.length)} in all`;
-        }
-
-        case 'pardon': {
-          setPardons((prev) => ({
-            ...prev,
-            [playerId]: prev[playerId] + 1,
-          }));
-
-          return `${subject} ${
-            isHost ? 'keep' : 'keeps'
-          } the pardon, it will free ${possessive} token once detention rules arrive`;
-        }
-
-        case 'repairs': {
-          // Houses and hotels do not exist yet, so the assessment totals zero.
-          return `${subject} ${
-            isHost ? 'owe' : 'owes'
-          } nothing for repairs this time`;
-        }
-
-        default:
-          return `${subject} ${isHost ? 'draw' : 'draws'} a card`;
-      }
-    },
-    [
-      movePlayerToSpace,
-      movePlayerStepByStep,
-      nextSpaceAhead,
-      awardStartReward,
-      adjustBalance,
-      players,
-    ],
-  );
-
-  resolveDrawnCardRef.current = resolveDrawnCard;
-
-  // Handle keyboard events for property card and dice info
-  useEffect(() => {
-    const handleEscape = (e) => {
-      if (e.key === 'Escape') {
-        if (selectedProperty !== null) {
-          setSelectedProperty(null);
-        } else if (showDiceInfo) {
-          setShowDiceInfo(false);
-        } else if (showMatchInfo) {
-          setShowMatchInfo(false);
-        }
-      }
-    };
-    window.addEventListener('keydown', handleEscape);
-    return () => window.removeEventListener('keydown', handleEscape);
-  }, [selectedProperty, showDiceInfo, showMatchInfo]);
-
-  // Handle AI opponent turn
-  const completeAITurn = useCallback(async () => {
-    const aiPlayerId = activePlayer.id;
-    const aiPlayerName = activePlayer.name;
-
-    // Roll two dice for AI using cryptographically secure random
-    const aiDiceResult = rollDice();
-    const { d1: aiDice1, d2: aiDice2, total: aiTotal, isDouble: aiIsDouble } = aiDiceResult;
-
-    setDice1(aiDice1);
-    setDice2(aiDice2);
-
-    // Check for three doubles in a row -> go to Kaidi Kottai (jail)
-    const currentAIDoublesCount = doublesCount[aiPlayerId] || 0;
-    if (aiIsDouble) {
-      const newAIDoublesCount = currentAIDoublesCount + 1;
-      setDoublesCount((prev) => ({ ...prev, [aiPlayerId]: newAIDoublesCount }));
-
-      if (newAIDoublesCount === 3) {
-        // Three doubles in a row - send to Kaidi Kottai (space 10)
-        setActivityText(
-          `${aiPlayerName} rolled doubles three times\n${aiPlayerName} must go to Kaidi Kottai (Detention)`
-        );
-        setPlayerPosition(aiPlayerId, DETENTION_SPACE);
-        setDoublesCount((prev) => ({ ...prev, [aiPlayerId]: 0 }));
-
-        // This turn is fully resolved
-        const matchEnded = commitTurn();
-
-        await new Promise((resolve) => setTimeout(resolve, 1800));
-        setDice1(null);
-        setDice2(null);
-        setActivityText(
-          matchEnded ? `Match complete after ${TOTAL_MATCH_TURNS} turns` : 'Your turn',
-        );
-
-        movementInProgressRef.current = false;
-        return;
-      }
-    } else {
-      // Not doubles, reset counter
-      setDoublesCount((prev) => ({ ...prev, [aiPlayerId]: 0 }));
+  const renderPropertyCard = () => {
+    if (selectedProperty === null) {
+      return null;
     }
 
-    const rollMessage = aiIsDouble
-      ? `${aiPlayerName} rolled doubles ${aiDice1} + ${aiDice2} = ${aiTotal}\n${aiPlayerName}'s token is moving`
-      : `${aiPlayerName} rolled ${aiDice1} + ${aiDice2} = ${aiTotal}\n${aiPlayerName}'s token is moving`;
-    setActivityText(rollMessage);
+    const space = BOARD_SPACES[selectedProperty];
+    const details = propertyDetails[selectedProperty];
+    const isRoute = space.type === 'route';
+    const isUtility = space.type === 'utility';
+    const deed = state.deeds[selectedProperty];
+    const owner = ownerOf(selectedProperty);
+    const accent = isRoute ? '#2f6170' : isUtility ? '#a46f17' : `var(--color-${space.colorGroup})`;
+    const kicker = isRoute ? 'Express route' : isUtility ? 'Utility' : 'District';
+    const mine = deed && deed.owner === myPlayerId && amAlive && !state.gameOver;
+    const balance = state.balances[myPlayerId] ?? 0;
 
-    await new Promise((resolve) => setTimeout(resolve, 600));
+    return (
+      <div className="property-card-overlay" onClick={() => setSelectedProperty(null)}>
+        <div
+          className="property-card"
+          onClick={(event) => event.stopPropagation()}
+          role="dialog"
+          aria-labelledby="property-card-title"
+        >
+          <header className="property-card-header">
+            <div className="property-card-color-bar" style={{ background: accent }} />
+            <p className="property-card-kicker">{kicker}</p>
+            <h3 id="property-card-title">{space.name}</h3>
+            <button
+              type="button"
+              className="property-card-close"
+              onClick={() => setSelectedProperty(null)}
+              aria-label="Close property details"
+            >
+              ✕
+            </button>
+          </header>
 
-    // Move AI player step by step
-    setIsMoving(true);
-    const passedStart = await movePlayerStepByStep(aiPlayerId, aiTotal);
-    setIsMoving(false);
+          <div className="property-card-body">
+            <div className="property-card-row">
+              <span>Owner</span>
+              <strong>
+                {owner ? `${owner.name}${deed.mortgaged ? ' · mortgaged' : ''}` : 'The bank'}
+              </strong>
+            </div>
+            <div className="property-card-row">
+              <span>Purchase price</span>
+              <strong>{formatRupees(space.price)}</strong>
+            </div>
 
-    const awarded = awardStartReward(aiPlayerId, passedStart);
+            {isRoute && (
+              <>
+                <div className="property-card-section">
+                  <h4>Rent by routes owned</h4>
+                  {routeDetails.rent.map((rent, index) => (
+                    <div className="property-card-row" key={rent}>
+                      <span>{index + 1} route{index ? 's' : ''} owned</span>
+                      <span>{formatRupees(rent)}</span>
+                    </div>
+                  ))}
+                </div>
+                <div className="property-card-section">
+                  <div className="property-card-row">
+                    <span>Mortgage value</span>
+                    <span>{formatRupees(routeDetails.mortgage)}</span>
+                  </div>
+                </div>
+                <p className="property-card-note">
+                  All four express route spaces, two on the Pallavan Superfast Express and two on The
+                  Farakka Express, share this schedule and rent rises with how many routes one owner holds
+                </p>
+              </>
+            )}
 
-    // Check if AI landed on route/station
-    const landedSpace = spaces[positionsRef.current[aiPlayerId]];
-    const isRoute = landedSpace.type === 'route';
-    const isUtility = landedSpace.type === 'utility';
+            {isUtility && (
+              <>
+                <div className="property-card-section">
+                  <h4>Rent by dice roll</h4>
+                  <div className="property-card-row">
+                    <span>Owning one utility</span>
+                    <span>{utilityDetails.multipliers[0]} × dice roll × {formatRupees(utilityDetails.perPip)}</span>
+                  </div>
+                  <div className="property-card-row">
+                    <span>Owning both utilities</span>
+                    <strong>{utilityDetails.multipliers[1]} × dice roll × {formatRupees(utilityDetails.perPip)}</strong>
+                  </div>
+                </div>
+                <div className="property-card-section">
+                  <div className="property-card-row">
+                    <span>Mortgage value</span>
+                    <span>{formatRupees(utilityDetails.mortgage)}</span>
+                  </div>
+                </div>
+              </>
+            )}
 
-    if (isRoute) {
-      audioHooksRef.current.routeLand(landedSpace.id);
-    } else if (isUtility) {
-      audioHooksRef.current.utilityLand();
+            {details && (
+              <>
+                <div className="property-card-section">
+                  <h4>Rent schedule</h4>
+                  {['Base rent', 'With 1 house', 'With 2 houses', 'With 3 houses', 'With 4 houses', 'With a hotel'].map(
+                    (label, index) => (
+                      <div className="property-card-row" key={label}>
+                        <span>{label}</span>
+                        <span>{formatRupees(details.rent[index])}</span>
+                      </div>
+                    ),
+                  )}
+                </div>
+                <div className="property-card-section">
+                  <div className="property-card-row">
+                    <span>House cost</span>
+                    <span>{formatRupees(details.houseCost)}</span>
+                  </div>
+                  <div className="property-card-row">
+                    <span>Mortgage value</span>
+                    <span>{formatRupees(details.mortgage)}</span>
+                  </div>
+                </div>
+                <p className="property-card-note">
+                  Own every district in this colour family to build, houses go up evenly across the
+                  family before a hotel, and base rent doubles once the family is complete
+                </p>
+              </>
+            )}
+          </div>
+
+          {mine && (
+            <div className="property-card-actions">
+              {!deed.mortgaged && details && (
+                <>
+                  <button
+                    type="button"
+                    className="property-action-btn"
+                    disabled={!Estate.canBuild(state.deeds, selectedProperty, BOARD_SPACES) || balance < details.houseCost}
+                    title="Own the full colour family and build evenly first"
+                    onClick={() => act({ type: 'manage', spaceId: selectedProperty, action: 'build' })}
+                  >
+                    Build {deed.houses === 4 ? 'hotel' : 'house'} ({formatRupees(details.houseCost)})
+                  </button>
+                  <button
+                    type="button"
+                    className="property-action-btn"
+                    disabled={!Estate.canSellBuilding(state.deeds, selectedProperty, BOARD_SPACES)}
+                    onClick={() => act({ type: 'manage', spaceId: selectedProperty, action: 'sell' })}
+                  >
+                    Sell building ({formatRupees(details.houseCost / 2)})
+                  </button>
+                </>
+              )}
+              {!deed.mortgaged && (
+                <button
+                  type="button"
+                  className="property-action-btn"
+                  disabled={!Estate.canMortgage(state.deeds, selectedProperty, BOARD_SPACES)}
+                  title="Sell the buildings in this family before mortgaging"
+                  onClick={() => act({ type: 'manage', spaceId: selectedProperty, action: 'mortgage' })}
+                >
+                  Mortgage ({formatRupees(Estate.mortgageValue(selectedProperty, BOARD_SPACES))})
+                </button>
+              )}
+              {deed.mortgaged && (
+                <button
+                  type="button"
+                  className="property-action-btn"
+                  disabled={balance < Estate.unmortgageCost(selectedProperty, BOARD_SPACES)}
+                  title="Includes 10% interest"
+                  onClick={() => act({ type: 'manage', spaceId: selectedProperty, action: 'unmortgage' })}
+                >
+                  Unmortgage ({formatRupees(Estate.unmortgageCost(selectedProperty, BOARD_SPACES))})
+                </button>
+              )}
+            </div>
+          )}
+        </div>
+      </div>
+    );
+  };
+
+  const renderResults = () => {
+    const over = state.gameOver;
+
+    if (!over || !showResults) {
+      return null;
     }
 
-    let message = `${aiPlayerName} advanced ${aiTotal} spaces to ${landedSpace.name}`;
-    if (awarded) {
-      message += `\n${aiPlayerName} received ${formatCurrency(START_REWARD)} for passing Rajyabhishekam`;
-    }
+    const winners = over.winners.map((id) => players.find((player) => player.id === id)).filter(Boolean);
+    const iWon = over.winners.includes(myPlayerId);
+    const headline = winners.length > 1
+      ? `${winners.map((player) => player.name).join(' and ')} share the crown`
+      : iWon
+        ? 'You win the crown'
+        : `${winners[0]?.name} wins the crown`;
 
-    // A card draw is part of resolving the destination, so it happens before
-    // the turn is committed.
-    if (landedSpace.type === 'chance' || landedSpace.type === 'community') {
-      setActivityText(`${message}\n${aiPlayerName} draws a card`);
-      const cardOutcome = await resolveDrawnCard(
-        aiPlayerId,
-        landedSpace.name,
-        landedSpace.type === 'chance' ? RAJAS_ORDER_DECK : TEMPLE_HUNDI_DECK,
-      );
-      message += `\n${cardOutcome}`;
-    }
+    return (
+      <div className="property-card-overlay results-overlay">
+        <div className="property-card results-sheet" role="dialog" aria-labelledby="results-title">
+          <div className="results-hero">
+            <span className="results-crown" aria-hidden="true">
+              <svg viewBox="0 0 24 24">
+                <path d="M4 17h16M5 17 3.5 8l5 3.5L12 5l3.5 6.5 5-3.5L19 17M6 20h12" />
+              </svg>
+            </span>
+            <p className="property-card-kicker">
+              {over.reason === 'bankruptcy'
+                ? 'Last player standing'
+                : `Match complete after ${TOTAL_MATCH_TURNS} turns`}
+            </p>
+            <h3 id="results-title">{headline}</h3>
+            <p className="results-sub">Ranked by total net worth, cash plus the value of every property held</p>
+          </div>
 
-    // Property economics: rent or purchase
-    if (landedSpace.type === 'property' || landedSpace.type === 'route' || landedSpace.type === 'utility') {
-      const deed = deeds[landedSpace.id];
+          <ol className="results-table">
+            {over.standings.map((entry, index) => {
+              const isWinner = over.winners.includes(entry.id);
+              return (
+                <li
+                  key={entry.id}
+                  className={`results-row ${isWinner ? 'results-row--winner' : ''}`}
+                  style={{ '--reveal-delay': `${index * 0.12}s` }}
+                >
+                  <span className="results-rank">{index + 1}</span>
+                  <span className={`results-token seat-${entry.pieceKey}`}>
+                    <PieceMark piece={entry.pieceKey} variant="token" title={entry.name} />
+                  </span>
+                  <span className="results-name">
+                    <strong>
+                      {entry.name}
+                      {entry.id === myPlayerId ? ' (You)' : ''}
+                    </strong>
+                    <span>
+                      {entry.bankrupt
+                        ? 'Bankrupt'
+                        : `Cash ${formatRupees(entry.cash)} · Property ${formatRupees(entry.propertyValue)} · ${entry.deeds} deed${entry.deeds === 1 ? '' : 's'}`}
+                    </span>
+                  </span>
+                  <span className="results-worth">
+                    <span>Net worth</span>
+                    <strong>{formatRupees(entry.netWorth)}</strong>
+                  </span>
+                </li>
+              );
+            })}
+          </ol>
 
-      if (deed && deed.owner !== aiPlayerId && !deed.mortgaged) {
-        // Owned by someone else - pay rent
-        const rent = Estate.rentFor(deeds, landedSpace.id, aiTotal, spaces);
-        if (rent > 0) {
-          if (balances[aiPlayerId] < rent) {
-            await handleInsolvency(aiPlayerId, rent, deed.owner);
-          } else {
-            transferCash(aiPlayerId, deed.owner, rent);
-            message += `\nPaid ${formatRupees(rent)} rent`;
-          }
-        }
-      } else if (!deed && landedSpace.price) {
-        // Unowned and purchasable - AI decides
-        aiDecidePurchase(aiPlayerId, landedSpace);
-        if (balances[aiPlayerId] >= landedSpace.price) {
-          message += `\nPurchased ${landedSpace.name}`;
-        }
-      }
-    }
+          <div className="results-actions">
+            {isHost && onRestart && <GoldButton onClick={onRestart}>Play again</GoldButton>}
+            <GoldButton variant="ghost" onClick={() => setShowResults(false)}>
+              View the board
+            </GoldButton>
+            <button type="button" className="text-link" onClick={onExit}>
+              Back to home
+            </button>
+          </div>
+          {!isHost && <p className="results-wait">The host can start a rematch for everyone</p>}
+        </div>
+      </div>
+    );
+  };
 
-    // Mark this player's turn as complete (movement and destination resolved)
-    const matchEnded = commitTurn();
-
-    // Switch back to next player
-    await new Promise((resolve) => setTimeout(resolve, 500));
-    setDice1(null);
-    setDice2(null);
-
-    message += matchEnded ? `\nMatch complete after ${TOTAL_MATCH_TURNS} turns` : '\nYour turn';
-
-    setActivityText(message);
-    movementInProgressRef.current = false;
-  }, [
-    activePlayer,
-    movePlayerStepByStep,
-    awardStartReward,
-    resolveDrawnCard,
-    setPlayerPosition,
-    doublesCount,
-    commitTurn,
-    deeds,
-    balances,
-    transferCash,
-    handleInsolvency,
-    aiDecidePurchase,
-  ]);
-
-  // Auto-trigger AI turns when it's an AI player's turn
-  useEffect(() => {
-    // Don't trigger if game is over, movement in progress, or it's the human player's turn
-    if (
-      gameOver ||
-      movementInProgressRef.current ||
-      isMoving ||
-      isRolling ||
-      activePlayer.id === 'p1'
-    ) {
-      return;
-    }
-
-    // It's an AI player's turn - trigger after a short delay
-    const timer = setTimeout(() => {
-      movementInProgressRef.current = true;
-      completeAITurn();
-    }, 850);
-
-    return () => clearTimeout(timer);
-  }, [activePlayer.id, gameOver, isMoving, isRolling, completeAITurn]);
-
-  // Roll dice handler
-  const rollDiceHandler = useCallback(async () => {
-    if (
-      isRolling ||
-      isMoving ||
-      movementInProgressRef.current ||
-      activePlayer.id !== 'p1' ||
-      gameOver
-    ) {
-      return;
-    }
-
-    movementInProgressRef.current = true;
-    setIsRolling(true);
-    setActivityText('The royal dice are rolling');
-
-    // Play dice roll audio hook
-    audioHooksRef.current.diceRoll();
-
-    // Simulate dice rolling animation
-    await new Promise((resolve) => setTimeout(resolve, 620));
-
-    // Generate two dice values using cryptographically secure random
-    const diceResult = rollDice();
-    const { d1, d2, total, isDouble } = diceResult;
-
-    setDice1(d1);
-    setDice2(d2);
-    setIsRolling(false);
-
-    // Check for three doubles in a row -> go to Kaidi Kottai (jail)
-    const currentDoublesCount = doublesCount.p1 || 0;
-    if (isDouble) {
-      const newDoublesCount = currentDoublesCount + 1;
-      setDoublesCount((prev) => ({ ...prev, p1: newDoublesCount }));
-
-      if (newDoublesCount === 3) {
-        // Three doubles in a row - send to Kaidi Kottai (space 10)
-        setActivityText(
-          'Doubles three times\nYou must go to Kaidi Kottai (Detention)'
-        );
-        setPlayerPosition('p1', DETENTION_SPACE);
-        setDoublesCount((prev) => ({ ...prev, p1: 0 }));
-
-        // This turn is fully resolved
-        const matchEnded = commitTurn();
-
-        await new Promise((resolve) => setTimeout(resolve, 1800));
-
-        if (matchEnded) {
-          setDice1(null);
-          setDice2(null);
-          setActivityText(`Match complete after ${TOTAL_MATCH_TURNS} turns`);
-          movementInProgressRef.current = false;
-          return;
-        }
-
-        setActivityText(`${players[1]?.name ?? 'Your opponent'} is preparing a move`);
-
-        await new Promise((resolve) => setTimeout(resolve, 850));
-        movementInProgressRef.current = false;
-        completeAITurn();
-        return;
-      }
-    } else {
-      // Not doubles, reset counter
-      setDoublesCount((prev) => ({ ...prev, p1: 0 }));
-    }
-
-    const rollMessage = isDouble
-      ? `You rolled doubles ${d1} + ${d2} = ${total}\nYour token is moving`
-      : `You rolled ${d1} + ${d2} = ${total}\nYour token is moving`;
-    setActivityText(rollMessage);
-
-    await new Promise((resolve) => setTimeout(resolve, 400));
-
-    // Move player step by step
-    setIsMoving(true);
-    const passedStart = await movePlayerStepByStep('p1', total);
-    setIsMoving(false);
-
-    const awarded = awardStartReward('p1', passedStart);
-
-    // Check if host landed on route or utility
-    const landedSpace = spaces[positionsRef.current.p1];
-    const isRoute = landedSpace.type === 'route';
-    const isUtility = landedSpace.type === 'utility';
-
-    if (isRoute) {
-      audioHooksRef.current.routeLand(landedSpace.id);
-    } else if (isUtility) {
-      audioHooksRef.current.utilityLand();
-    }
-
-    let finalMessage = `You advanced ${total} spaces to ${landedSpace.name}`;
-    if (awarded) {
-      finalMessage += `\nYou received ${formatCurrency(START_REWARD)} for passing Rajyabhishekam`;
-    }
-
-    setActivityText(finalMessage);
-
-    // A card draw is part of resolving the destination, so it happens before
-    // the turn is committed.
-    if (landedSpace.type === 'chance' || landedSpace.type === 'community') {
-      setActivityText(`${finalMessage}\nDrawing a card`);
-      const cardOutcome = await resolveDrawnCard(
-        'p1',
-        landedSpace.name,
-        landedSpace.type === 'chance' ? RAJAS_ORDER_DECK : TEMPLE_HUNDI_DECK,
-      );
-      finalMessage += `\n${cardOutcome}`;
-      setActivityText(finalMessage);
-    }
-
-    // Property economics: rent or purchase
-    if (landedSpace.type === 'property' || landedSpace.type === 'route' || landedSpace.type === 'utility') {
-      const deed = deeds[landedSpace.id];
-
-      if (deed && deed.owner !== 'p1' && !deed.mortgaged) {
-        // Owned by someone else - pay rent
-        const rent = Estate.rentFor(deeds, landedSpace.id, total, spaces);
-        if (rent > 0) {
-          if (balances.p1 < rent) {
-            await handleInsolvency('p1', rent, deed.owner);
-          } else {
-            transferCash('p1', deed.owner, rent);
-            finalMessage += `\nPaid ${formatRupees(rent)} rent`;
-            setActivityText(finalMessage);
-          }
-        }
-      } else if (!deed && landedSpace.price) {
-        // Unowned and purchasable - offer purchase
-        await offerPurchase('p1', landedSpace.id);
-      }
-    }
-
-    // Movement and destination resolved: this turn is complete
-    const matchEnded = commitTurn();
-
-    if (matchEnded) {
-      setActivityText(`${finalMessage}\nMatch complete after ${TOTAL_MATCH_TURNS} turns`);
-      movementInProgressRef.current = false;
-      return;
-    }
-
-    // Reset movement flag so next player's turn can trigger
-    movementInProgressRef.current = false;
-
-    // Activity text will be set by the next player's turn (auto-triggered by useEffect)
-    setActivityText(`${finalMessage}\nPreparing the next turn`);
-  }, [
-    isRolling,
-    isMoving,
-    activePlayer.id,
-    gameOver,
-    doublesCount,
-    commitTurn,
-    movePlayerStepByStep,
-    awardStartReward,
-    resolveDrawnCard,
-    setPlayerPosition,
-    completeAITurn,
-    deeds,
-    balances,
-    transferCash,
-    handleInsolvency,
-    offerPurchase,
-    players,
-  ]);
+  const offer = state.purchaseOffer;
+  const deciding = offer && offer.playerId !== myPlayerId ? players.find((player) => player.id === offer.playerId) : null;
 
   return (
     <main className="board-game-page">
@@ -1547,32 +747,37 @@ export default function BoardGame({ onExit, playerCount = 2, hostPiece = 'lamp',
 
         <div className="round-indicator">
           <span>Turn</span>
-          <strong>{turnCount.toString().padStart(3, '0')}</strong>
+          <strong>{state.turnCount.toString().padStart(3, '0')}</strong>
           <span>of {TOTAL_MATCH_TURNS}</span>
           <button
             type="button"
             className="match-info-button"
-            onClick={() => setShowMatchInfo(true)}
-            aria-label="How match length works"
-            title="How match length works"
+            onClick={() => setSheet('match')}
+            aria-label="How the match works"
+            title="How the match works"
           >
             i
           </button>
         </div>
 
         <div className="board-topbar-actions">
+          {session && (
+            <span className="room-code-pill" title="Room code">
+              {session.code}
+            </span>
+          )}
           {onMusicToggle && (
             <button
               className="music-toggle-button"
               type="button"
               onClick={onMusicToggle}
-              aria-pressed={isMusicEnabled}
-              aria-label={isMusicEnabled ? 'Mute music' : 'Play music'}
-              title={isMusicEnabled ? 'Mute music' : 'Play music'}
+              aria-pressed={soundEnabled}
+              aria-label={soundEnabled ? 'Mute all sound' : 'Turn sound on'}
+              title={soundEnabled ? 'Sound on' : 'Sound off'}
             >
               <svg viewBox="0 0 24 24" aria-hidden="true">
                 <path className="music-icon-body" d="M4 9.5h3.2L12 5.5v13l-4.8-4H4z" />
-                {isMusicEnabled ? (
+                {soundEnabled ? (
                   <>
                     <path d="M15.5 9a4 4 0 0 1 0 6" />
                     <path d="M18 6.5a7.5 7.5 0 0 1 0 11" />
@@ -1590,87 +795,91 @@ export default function BoardGame({ onExit, playerCount = 2, hostPiece = 'lamp',
       </header>
 
       <section className="board-game-layout">
-        <aside className="player-panel">
-          <p className="eyebrow">The table</p>
+        <div className="board-side">
+          <aside className="player-panel">
+            <p className="eyebrow">The table</p>
 
-          <div className="player-list">
-            {players.map((player, index) => (
-              <article
-                className={`game-player seat-${player.pieceKey} ${
-                  index === activePlayerIndex ? 'game-player--active' : ''
-                }`}
-                key={player.id}
-              >
-                <span className="game-player-token">
-                  <PieceMark piece={player.pieceKey} variant="token" title={player.name} />
-                </span>
-
-                <div>
-                  <strong>{player.name}</strong>
-                  <span>
-                    {index === activePlayerIndex
-                      ? 'Taking a turn'
-                      : 'Considering the court'}
-                  </span>
-                  {pardons[player.id] > 0 && (
-                    <span
-                      className="player-pardons"
-                      title="Get Out of Kaidi Kottai Free"
-                    >
-                      ⚖ {pardons[player.id]} pardon
-                      {pardons[player.id] > 1 ? 's' : ''} held
+            <div className="player-list">
+              {players.map((player, index) => {
+                const bankrupt = state.bankrupt[player.id];
+                return (
+                  <article
+                    className={`game-player seat-${player.pieceKey} ${index === state.activeIndex && !state.gameOver ? 'game-player--active' : ''} ${bankrupt ? 'game-player--bankrupt' : ''}`}
+                    key={player.id}
+                  >
+                    <span className="game-player-token">
+                      <PieceMark piece={player.pieceKey} variant="token" title={player.name} />
                     </span>
-                  )}
-                </div>
 
-                <b>{formatCurrency(balances[player.id])}</b>
-              </article>
-            ))}
-          </div>
+                    <div>
+                      <strong>
+                        {player.name}
+                        {player.id === myPlayerId && <em className="you-chip">You</em>}
+                      </strong>
+                      <span>
+                        {bankrupt
+                          ? 'Bankrupt'
+                          : index === state.activeIndex && !state.gameOver
+                            ? 'Taking a turn'
+                            : kindLabel(player)}
+                      </span>
+                      {state.pardons[player.id] > 0 && (
+                        <span className="player-pardons" title="Get Out of Kaidi Kottai Free">
+                          ⚖ {state.pardons[player.id]} pardon{state.pardons[player.id] > 1 ? 's' : ''} held
+                        </span>
+                      )}
+                    </div>
 
-          <div className="match-notice">
-            <p className="match-notice-label">Latest move</p>
-            <p className="match-notice-text" aria-live="polite">{activityText}</p>
-          </div>
-        </aside>
+                    <AnimatedBalance value={state.balances[player.id]} className="game-player-balance" />
+                    <span className="game-player-worth">Net worth {formatRupees(netWorths[player.id])}</span>
+                  </article>
+                );
+              })}
+            </div>
 
-        <section
-          className="game-board-area"
-          aria-label="Manapally game board"
-        >
+            <div className="match-notice">
+              <p className="match-notice-label">Latest move</p>
+              <p className="match-notice-text" aria-live="polite">
+                {state.activity}
+              </p>
+            </div>
+          </aside>
+
+          {session && <ChatPanel session={session} compact />}
+        </div>
+
+        <section className="game-board-area" aria-label="Manapally game board">
           <div className="game-board">
-            {spaces.map((space) => {
-              const [column, row] = gridCoordinates[space.id];
-
-              const playersOnSpace = players.filter(
-                (player) => playerPositions[player.id] === space.id,
+            {BOARD_SPACES.map((space) => {
+              const [column, row] = BOARD_GRID[space.id];
+              const tokens = players.filter(
+                (player) => state.positions[player.id] === space.id && !state.bankrupt[player.id],
               );
-
-              const isClickable =
-                space.type === 'property' ||
-                space.type === 'route' ||
-                space.type === 'utility';
+              const isClickable = ['property', 'route', 'utility'].includes(space.type);
+              const deed = state.deeds[space.id];
+              const owner = deed ? ownerOf(space.id) : null;
 
               return (
                 <article
-                  className={`board-space ${getSpaceClass(space)} ${
-                    isClickable ? 'board-space--clickable' : ''
-                  } ${selectedProperty === space.id ? 'board-space--selected' : ''}`}
+                  className={`board-space ${getSpaceClass(space)} ${isClickable ? 'board-space--clickable' : ''} ${
+                    selectedProperty === space.id ? 'board-space--selected' : ''
+                  } ${owner ? 'board-space--owned' : ''}`}
                   key={space.id}
-                  style={{
-                    gridColumn: column,
-                    gridRow: row,
-                  }}
+                  style={{ gridColumn: column, gridRow: row }}
                   onClick={() => isClickable && setSelectedProperty(space.id)}
-                  onKeyDown={(e) => {
-                    if (isClickable && (e.key === 'Enter' || e.key === ' ')) {
-                      e.preventDefault();
+                  onKeyDown={(event) => {
+                    if (isClickable && (event.key === 'Enter' || event.key === ' ')) {
+                      event.preventDefault();
                       setSelectedProperty(space.id);
                     }
                   }}
                   tabIndex={isClickable ? 0 : -1}
                   role={isClickable ? 'button' : undefined}
-                  aria-label={isClickable ? `View details for ${space.name}` : undefined}
+                  aria-label={
+                    isClickable
+                      ? `${space.name}, ${owner ? `owned by ${owner.name}` : `for sale at ${formatRupees(space.price)}`}`
+                      : undefined
+                  }
                 >
                   <span className="space-name">
                     {space.name}
@@ -1682,48 +891,32 @@ export default function BoardGame({ onExit, playerCount = 2, hostPiece = 'lamp',
                     )}
                   </span>
 
-                  {space.price && (
-                    <span className="space-cost">
-                      {formatCurrency(space.price)}
+                  {/* Owned spaces swap the price label for a solid owner badge */}
+                  {owner ? (
+                    <span
+                      className={`space-owner seat-${owner.pieceKey} ${deed.mortgaged ? 'space-owner--mortgaged' : ''}`}
+                      title={`Owned by ${owner.name}${deed.mortgaged ? ', mortgaged' : ''}`}
+                    >
+                      <PieceMark piece={owner.pieceKey} variant="token" />
+                      <span>{deed.mortgaged ? 'Mortgaged' : owner.id === myPlayerId ? 'Yours' : owner.name}</span>
+                    </span>
+                  ) : (
+                    space.price && <span className="space-cost">{formatCurrency(space.price)}</span>
+                  )}
+
+                  {space.icon && !owner && <span className="space-icon">{space.icon}</span>}
+
+                  {deed && owner && (deed.houses > 0 || deed.hotel) && (
+                    <span className={`property-tally-container seat-${owner.pieceKey}`}>
+                      <PropertyTally houses={deed.houses} hotel={deed.hotel} />
                     </span>
                   )}
 
-                  {space.icon && (
-                    <span className="space-icon">{space.icon}</span>
-                  )}
-
-                  {/* Ownership stamp - faded piece mark in owner's color */}
-                  {deeds[space.id] && !deeds[space.id].mortgaged && (() => {
-                    const owner = players.find(p => p.id === deeds[space.id].owner);
-                    return owner ? (
-                      <div className={`ownership-stamp seat-${owner.pieceKey}`}>
-                        <PieceMark piece={owner.pieceKey} variant="stamp" />
-                      </div>
-                    ) : null;
-                  })()}
-
-                  {/* Property tally marks - houses and hotel indicators */}
-                  {deeds[space.id] && (deeds[space.id].houses > 0 || deeds[space.id].hotel) && (() => {
-                    const owner = players.find(p => p.id === deeds[space.id].owner);
-                    return owner ? (
-                      <div className={`property-tally-container seat-${owner.pieceKey}`}>
-                        <PropertyTally
-                          houses={deeds[space.id].houses}
-                          hotel={deeds[space.id].hotel}
-                        />
-                      </div>
-                    ) : null;
-                  })()}
-
-                  {playersOnSpace.length > 0 && (
+                  {tokens.length > 0 && (
                     <div className="space-tokens">
-                      {playersOnSpace.map((player) => (
+                      {tokens.map((player) => (
                         <span className={`board-token seat-${player.pieceKey}`} key={player.id}>
-                          <PieceMark
-                            piece={player.pieceKey}
-                            variant="token"
-                            title={player.name}
-                          />
+                          <PieceMark piece={player.pieceKey} variant="token" title={player.name} />
                         </span>
                       ))}
                     </div>
@@ -1732,606 +925,134 @@ export default function BoardGame({ onExit, playerCount = 2, hostPiece = 'lamp',
               );
             })}
 
-            {/* Direction indicator - clockwise arrow */}
             <div className="board-direction-indicator" aria-label="Movement direction is clockwise">
               <svg viewBox="0 0 100 100" className="direction-arrow">
-                <path
-                  d="M 50 10 A 40 40 0 1 1 10 50"
-                  fill="none"
-                  stroke="currentColor"
-                  strokeWidth="2"
-                  strokeDasharray="4 3"
-                />
+                <path d="M 50 10 A 40 40 0 1 1 10 50" fill="none" stroke="currentColor" strokeWidth="2" strokeDasharray="4 3" />
                 <polygon points="8,50 14,54 14,46" fill="currentColor" />
               </svg>
             </div>
 
             <div className="board-centre-art">
               <BrandMark size={64} className="centre-crown" />
-
               <h1>Manapally</h1>
-
               <p>Premium South Indian Strategy Board Game</p>
-
               <div className="centre-divider" />
-
               <span className="centre-message">
                 Pass Rajyabhishekam
                 <br />
                 to receive {formatCurrency(START_REWARD)}
               </span>
+              {deciding && (
+                <span className="centre-status">
+                  {deciding.name} is deciding on {BOARD_SPACES[offer.spaceId].name}
+                </span>
+              )}
             </div>
           </div>
 
-          {/* Drawn card: held on screen for three seconds before it resolves */}
-          {drawnCard !== null && (
+          {state.drawnCard && (
             <div className="drawn-card-overlay">
-              <div
-                className="drawn-card"
-                role="status"
-                aria-live="polite"
-                aria-label={`${drawnCard.deckName}, ${drawnCard.text}`}
-              >
-                <span className="drawn-card-deck">{drawnCard.deckName}</span>
+              <div className="drawn-card" role="status" aria-live="polite">
+                <span className="drawn-card-deck">{state.drawnCard.deckName}</span>
                 <div className="drawn-card-rule" />
-                <p className="drawn-card-text">{drawnCard.text}</p>
-                <span className="drawn-card-holder">
-                  Drawn by {drawnCard.playerName}
-                </span>
+                <p className="drawn-card-text">{state.drawnCard.text}</p>
+                <span className="drawn-card-holder">Drawn by {state.drawnCard.playerName}</span>
               </div>
             </div>
           )}
 
-          {/* Purchase Offer Modal */}
-          {purchaseOffer !== null && (() => {
-            const space = spaces[purchaseOffer.spaceId];
-            const player = players.find(p => p.id === purchaseOffer.playerId);
+          {renderPurchaseOffer()}
+          {renderAuction()}
+          {renderPropertyCard()}
+          {renderResults()}
 
-            if (!space || !player) return null;
-
-            const canAfford = balances[purchaseOffer.playerId] >= space.price;
-            const remaining = balances[purchaseOffer.playerId] - space.price;
-            const accentColor = space.colorGroup
-              ? `var(--color-${space.colorGroup})`
-              : space.type === 'route'
-                ? '#2f6170'
-                : '#a46f17';
-
-            return (
-              <div className="drawn-card-overlay">
-                <div
-                  className="property-card purchase-offer"
-                  role="dialog"
-                  aria-labelledby="purchase-offer-title"
-                >
-                  <header className="property-card-header">
-                    <div
-                      className="property-card-color-bar"
-                      style={{ background: accentColor }}
-                    />
-                    <p className="property-card-kicker">For sale</p>
-                    <h3 id="purchase-offer-title">{space.name}</h3>
-                  </header>
-
-                  <div className="property-card-body">
-                    <div className="property-card-row">
-                      <span>Price</span>
-                      <strong className={canAfford ? 'amount-positive' : 'amount-negative'}>
-                        {formatRupees(space.price)}
-                      </strong>
-                    </div>
-
-                    <div className="property-card-row">
-                      <span>Your balance</span>
-                      <span>{formatRupees(balances[purchaseOffer.playerId])}</span>
-                    </div>
-
-                    <div className="property-card-row">
-                      <span>{canAfford ? 'Balance after buying' : 'Shortfall'}</span>
-                      <span className={canAfford ? '' : 'amount-negative'}>
-                        {formatRupees(Math.abs(remaining))}
-                      </span>
-                    </div>
-
-                    {!canAfford && (
-                      <p className="property-card-note property-card-note--warning">
-                        You do not have enough cash to buy this space right now
-                      </p>
-                    )}
-
-                    <div className="purchase-offer-actions">
-                      <GoldButton
-                        onClick={() => handlePurchaseDecision(true)}
-                        disabled={!canAfford}
-                      >
-                        Buy property
-                      </GoldButton>
-                      <GoldButton
-                        variant="ghost"
-                        onClick={() => handlePurchaseDecision(false)}
-                      >
-                        Decline
-                      </GoldButton>
-                    </div>
-                  </div>
-                </div>
-              </div>
-            );
-          })()}
-
-          {/* Property Information Card */}
-          {selectedProperty !== null && (
-            <div
-              className="property-card-overlay"
-              onClick={() => setSelectedProperty(null)}
-            >
-              <div
-                className="property-card"
-                onClick={(e) => e.stopPropagation()}
-                role="dialog"
-                aria-labelledby="property-card-title"
-              >
-                {(() => {
-                  const space = spaces[selectedProperty];
-
-                  if (!space) return null;
-
-                  const details = propertyDetails[selectedProperty];
-                  const isRoute = space.type === 'route';
-                  const isUtility = space.type === 'utility';
-
-                  if (!isRoute && !isUtility && !details) return null;
-
-                  const accentColor = isRoute
-                    ? '#2f6170'
-                    : isUtility
-                      ? '#a46f17'
-                      : space.colorGroup
-                        ? `var(--color-${space.colorGroup})`
-                        : '#888';
-
-                  const kicker = isRoute
-                    ? 'Express route'
-                    : isUtility
-                      ? 'Utility'
-                      : 'District';
-
-                  return (
-                    <>
-                      <header className="property-card-header">
-                        <div
-                          className="property-card-color-bar"
-                          style={{ background: accentColor }}
-                        />
-                        <p className="property-card-kicker">{kicker}</p>
-                        <h3 id="property-card-title">{space.name}</h3>
-                        <button
-                          type="button"
-                          className="property-card-close"
-                          onClick={() => setSelectedProperty(null)}
-                          aria-label="Close property details"
-                        >
-                          ✕
-                        </button>
-                      </header>
-
-                      {isRoute && (
-                        <div className="property-card-body">
-                          <div className="property-card-row">
-                            <span>Purchase price</span>
-                            <strong>{formatRupees(routeDetails.price)}</strong>
-                          </div>
-
-                          <div className="property-card-section">
-                            <h4>Rent by routes owned</h4>
-                            <div className="property-card-row">
-                              <span>1 route owned</span>
-                              <span>{formatRupees(routeDetails.rent[0])}</span>
-                            </div>
-                            <div className="property-card-row">
-                              <span>2 routes owned</span>
-                              <span>{formatRupees(routeDetails.rent[1])}</span>
-                            </div>
-                            <div className="property-card-row">
-                              <span>3 routes owned</span>
-                              <span>{formatRupees(routeDetails.rent[2])}</span>
-                            </div>
-                            <div className="property-card-row">
-                              <span>4 routes owned</span>
-                              <strong>{formatRupees(routeDetails.rent[3])}</strong>
-                            </div>
-                          </div>
-
-                          <div className="property-card-section">
-                            <div className="property-card-row">
-                              <span>Mortgage value</span>
-                              <span>{formatRupees(routeDetails.mortgage)}</span>
-                            </div>
-                          </div>
-
-                          <p className="property-card-note">
-                            All four express route spaces, two on the Pallavan Superfast
-                            Express and two on The Farakka Express, share this schedule
-                            and rent rises with how many routes a single owner holds
-                          </p>
-                        </div>
-                      )}
-
-                      {isUtility && (
-                        <div className="property-card-body">
-                          <div className="property-card-row">
-                            <span>Purchase price</span>
-                            <strong>{formatRupees(utilityDetails.price)}</strong>
-                          </div>
-
-                          <div className="property-card-section">
-                            <h4>Rent by dice roll</h4>
-                            <div className="property-card-row">
-                              <span>Owning one utility</span>
-                              <span>
-                                {utilityDetails.multipliers[0]} × dice roll ×{' '}
-                                {formatRupees(utilityDetails.perPip)}
-                              </span>
-                            </div>
-                            <div className="property-card-row">
-                              <span>Owning both utilities</span>
-                              <strong>
-                                {utilityDetails.multipliers[1]} × dice roll ×{' '}
-                                {formatRupees(utilityDetails.perPip)}
-                              </strong>
-                            </div>
-                          </div>
-
-                          <div className="property-card-section">
-                            <div className="property-card-row">
-                              <span>Mortgage value</span>
-                              <span>{formatRupees(utilityDetails.mortgage)}</span>
-                            </div>
-                          </div>
-
-                          <p className="property-card-note">
-                            Kaveri Power Company and Tungabhadra Water Works share this
-                            schedule, a roll of 7 costs{' '}
-                            {formatRupees(
-                              utilityDetails.multipliers[0] * 7 * utilityDetails.perPip,
-                            )}{' '}
-                            against one utility and{' '}
-                            {formatRupees(
-                              utilityDetails.multipliers[1] * 7 * utilityDetails.perPip,
-                            )}{' '}
-                            against both
-                          </p>
-                        </div>
-                      )}
-
-                      {!isRoute && !isUtility && (
-                        <div className="property-card-body">
-                          <div className="property-card-row">
-                            <span>Purchase price</span>
-                            <strong>{formatCurrency(space.price)}</strong>
-                          </div>
-
-                          <div className="property-card-section">
-                            <h4>Rent schedule</h4>
-                            <div className="property-card-row">
-                              <span>Base rent</span>
-                              <span>{formatCurrency(details.rent[0])}</span>
-                            </div>
-                            <div className="property-card-row">
-                              <span>With 1 house</span>
-                              <span>{formatCurrency(details.rent[1])}</span>
-                            </div>
-                            <div className="property-card-row">
-                              <span>With 2 houses</span>
-                              <span>{formatCurrency(details.rent[2])}</span>
-                            </div>
-                            <div className="property-card-row">
-                              <span>With 3 houses</span>
-                              <span>{formatCurrency(details.rent[3])}</span>
-                            </div>
-                            <div className="property-card-row">
-                              <span>With 4 houses</span>
-                              <span>{formatCurrency(details.rent[4])}</span>
-                            </div>
-                            <div className="property-card-row">
-                              <span>With a hotel</span>
-                              <strong>{formatCurrency(details.rent[5])}</strong>
-                            </div>
-                          </div>
-
-                          <div className="property-card-section">
-                            <div className="property-card-row">
-                              <span>House cost</span>
-                              <span>{formatCurrency(details.houseCost)}</span>
-                            </div>
-                            <div className="property-card-row">
-                              <span>Mortgage value</span>
-                              <span>{formatCurrency(details.mortgage)}</span>
-                            </div>
-                          </div>
-
-                          <p className="property-card-note">
-                            Own every district in this colour family to start building,
-                            houses go up evenly across the family before a hotel
-                          </p>
-                        </div>
-                      )}
-
-                      {/* Owner Actions - Build/Sell/Mortgage buttons */}
-                      {(() => {
-                        const deed = deeds[selectedProperty];
-                        if (!deed || deed.owner !== 'p1') return null;
-
-                        const details = propertyDetails[selectedProperty];
-                        if (!details) return null;
-
-                        const canBuildHouse = Estate.canBuild(deeds, selectedProperty, spaces);
-                        const canSellBuilding = Estate.canSellBuilding(deeds, selectedProperty, spaces);
-                        const canMortgage = Estate.canMortgage(deeds, selectedProperty, spaces);
-                        const unmortgageCost = deed.mortgaged ? Estate.unmortgageCost(selectedProperty, spaces) : 0;
-                        const buildingType = deed.houses === 4 ? 'Hotel' : 'House';
-                        const buildCost = details.houseCost;
-                        const sellRevenue = Math.floor(details.houseCost * 0.5);
-
-                        return (
-                          <div className="property-card-actions">
-                            {!deed.mortgaged && (
-                              <>
-                                <button
-                                  type="button"
-                                  className="property-action-btn"
-                                  disabled={!canBuildHouse || balances['p1'] < buildCost}
-                                  onClick={() => {
-                                    if (balances['p1'] >= buildCost) {
-                                      setBalances(prev => ({ ...prev, p1: prev.p1 - buildCost }));
-                                      setDeeds(prev => {
-                                        const updated = { ...prev };
-                                        if (deed.houses === 4) {
-                                          updated[selectedProperty] = { ...deed, houses: 0, hotel: true };
-                                        } else {
-                                          updated[selectedProperty] = { ...deed, houses: deed.houses + 1 };
-                                        }
-                                        return updated;
-                                      });
-                                    }
-                                  }}
-                                  title={!canBuildHouse ? 'Own the full colour family and build evenly first' : `Build a ${buildingType.toLowerCase()} for ${formatRupees(buildCost)}`}
-                                >
-                                  Build {buildingType} ({formatRupees(buildCost)})
-                                </button>
-                                <button
-                                  type="button"
-                                  className="property-action-btn"
-                                  disabled={!canSellBuilding}
-                                  onClick={() => {
-                                    const result = Estate.sellOneBuilding(deeds, selectedProperty, spaces);
-                                    if (result) {
-                                      setDeeds(result.updatedDeeds);
-                                      setBalances(prev => ({ ...prev, p1: prev.p1 + result.cash }));
-                                    }
-                                  }}
-                                  title={!canSellBuilding ? 'No buildings to sell' : `Sell for ${formatRupees(sellRevenue)}`}
-                                >
-                                  Sell Building ({formatRupees(sellRevenue)})
-                                </button>
-                                <button
-                                  type="button"
-                                  className="property-action-btn"
-                                  disabled={!canMortgage}
-                                  onClick={() => {
-                                    const value = Estate.mortgageValue(selectedProperty, spaces);
-                                    setDeeds(prev => ({
-                                      ...prev,
-                                      [selectedProperty]: { ...deed, mortgaged: true }
-                                    }));
-                                    setBalances(prev => ({ ...prev, p1: prev.p1 + value }));
-                                  }}
-                                  title={!canMortgage ? 'Sell the buildings in this family before mortgaging' : `Mortgage for ${formatRupees(details.mortgage)}`}
-                                >
-                                  Mortgage ({formatRupees(details.mortgage)})
-                                </button>
-                              </>
-                            )}
-                            {deed.mortgaged && (
-                              <button
-                                type="button"
-                                className="property-action-btn"
-                                disabled={balances['p1'] < unmortgageCost}
-                                onClick={() => {
-                                  if (balances['p1'] >= unmortgageCost) {
-                                    setBalances(prev => ({ ...prev, p1: prev.p1 - unmortgageCost }));
-                                    setDeeds(prev => ({
-                                      ...prev,
-                                      [selectedProperty]: { ...deed, mortgaged: false }
-                                    }));
-                                  }
-                                }}
-                                title={`Unmortgage for ${formatRupees(unmortgageCost)}, including 10% interest`}
-                              >
-                                Unmortgage ({formatRupees(unmortgageCost)})
-                              </button>
-                            )}
-                          </div>
-                        );
-                      })()}
-                    </>
-                  );
-                })()}
-              </div>
-            </div>
-          )}
-
-          {/* Dice Information Modal */}
-          {showDiceInfo && (
-            <div
-              className="property-card-overlay"
-              onClick={() => setShowDiceInfo(false)}
-            >
-              <div
-                className="property-card dice-info-modal"
-                onClick={(e) => e.stopPropagation()}
-                role="dialog"
-                aria-labelledby="dice-info-title"
-              >
+          {sheet === 'dice' && (
+            <div className="property-card-overlay" onClick={() => setSheet(null)}>
+              <div className="property-card dice-info-modal" onClick={(event) => event.stopPropagation()} role="dialog" aria-labelledby="dice-info-title">
                 <header className="property-card-header">
                   <p className="property-card-kicker">Fair play</p>
                   <h3 id="dice-info-title">How the dice work</h3>
-                  <button
-                    type="button"
-                    className="property-card-close"
-                    onClick={() => setShowDiceInfo(false)}
-                    aria-label="Close dice information"
-                  >
+                  <button type="button" className="property-card-close" onClick={() => setSheet(null)} aria-label="Close dice information">
                     ✕
                   </button>
                 </header>
-
                 <div className="property-card-body dice-info-body">
                   <p className="dice-info-intro">
-                    Manapally rolls with the cryptographically secure random generator
-                    built into your browser, so every roll is fair and unpredictable
+                    Manapally rolls with the cryptographically secure random generator built into your
+                    browser, so every roll is fair and unpredictable
                   </p>
-
                   <div className="property-card-section">
                     <h4>Two standard dice</h4>
                     <p>
-                      Each turn rolls two six sided dice showing 1 to 6, both values are
-                      shown and your token moves their total, three doubles in a row
-                      sends you to Kaidi Kottai (Detention)
+                      Each turn rolls two six sided dice showing 1 to 6 and your token moves their total,
+                      three doubles in a row sends you to Kaidi Kottai (Detention)
                     </p>
                   </div>
-
-                  <div className="property-card-section">
-                    <h4>Why a cryptographic generator</h4>
-                    <p>
-                      The everyday random function in JavaScript is a pseudo random
-                      generator, its results can in theory be predicted and its spread is
-                      not perfectly even
-                    </p>
-                    <p>
-                      Manapally uses <code>getRandomValues</code> from the Web Crypto API
-                      instead, the same technology browsers rely on for encryption
-                    </p>
-                  </div>
-
                   <div className="property-card-section">
                     <h4>Perfectly fair with rejection sampling</h4>
                     <p>
-                      The generator produces random bytes from 0 to 255, and 256 does not
-                      divide evenly by 6 (256 = 6 × 42 + 4), so a plain remainder would
-                      make faces 1 to 4 appear 43 times for every 42 of faces 5 and 6,
-                      this is called <strong>modulo bias</strong>
-                    </p>
-                    <p>
-                      The fix is to discard any byte of 252 or more (252 = 6 × 42) and
-                      draw again, the remaining values split into exactly 42 per face and
-                      a redraw happens only 4 times in 256, so the loop almost never runs
-                      twice
+                      Random bytes run from 0 to 255 and 256 does not divide evenly by 6, so any byte of
+                      252 or more is discarded and drawn again, leaving exactly 42 values per face
                     </p>
                   </div>
-
                   <div className="property-card-section">
                     <h4>Real dice probabilities</h4>
-                    <p>
-                      Rolling two separate dice rather than one number from 2 to 12 gives
-                      authentic odds
-                    </p>
                     <ul className="dice-probability-list">
                       <li><strong>7</strong> is the most common total with 6 ways to roll it</li>
                       <li><strong>6 and 8</strong> follow closely with 5 ways each</li>
                       <li><strong>2 and 12</strong> are the rarest with 1 way each</li>
                     </ul>
-                    <p className="dice-info-note">
-                      This matches physical dice exactly
-                    </p>
                   </div>
-
-                  <div className="property-card-section">
-                    <h4>The algorithm</h4>
-                    <ol className="dice-info-steps">
-                      <li>Draw a random byte from 0 to 255 with the Web Crypto API</li>
-                      <li>If the byte is 252 or more, discard it and draw again</li>
-                      <li>Divide by 6 and keep the remainder, giving 0 to 5</li>
-                      <li>Add 1 for a final face from 1 to 6</li>
-                      <li>Repeat independently for the second die</li>
-                    </ol>
-                  </div>
-
-                  <p className="dice-info-footer">
-                    Every roll is unpredictable, fair and mathematically sound
-                    <br />
-                    May fortune favour your strategy
-                  </p>
+                  <p className="dice-info-footer">May fortune favour your strategy</p>
                 </div>
               </div>
             </div>
           )}
 
-          {showMatchInfo && (
-            <div
-              className="property-card-overlay"
-              onClick={() => setShowMatchInfo(false)}
-            >
-              <div
-                className="property-card match-info-modal"
-                onClick={(e) => e.stopPropagation()}
-                role="dialog"
-                aria-labelledby="match-info-title"
-              >
+          {sheet === 'match' && (
+            <div className="property-card-overlay" onClick={() => setSheet(null)}>
+              <div className="property-card match-info-modal" onClick={(event) => event.stopPropagation()} role="dialog" aria-labelledby="match-info-title">
                 <header className="property-card-header">
                   <p className="property-card-kicker">Match rules</p>
-                  <h3 id="match-info-title">Match length</h3>
-                  <button
-                    type="button"
-                    className="property-card-close"
-                    onClick={() => setShowMatchInfo(false)}
-                    aria-label="Close match information"
-                  >
+                  <h3 id="match-info-title">How a match ends</h3>
+                  <button type="button" className="property-card-close" onClick={() => setSheet(null)} aria-label="Close match information">
                     ✕
                   </button>
                 </header>
-
                 <div className="property-card-body dice-info-body">
                   <p className="dice-info-intro">
-                    Manapally is an original strategy game played over a fixed match of{' '}
-                    {TOTAL_MATCH_TURNS} turns
+                    The richest estate wins, measured by total net worth when the match ends
                   </p>
-
                   <div className="property-card-section">
-                    <h4>The {TOTAL_MATCH_TURNS} turn benchmark</h4>
+                    <h4>Two ways to finish</h4>
+                    <ul className="dice-probability-list">
+                      <li>All {TOTAL_MATCH_TURNS} turns shared by the table have been played</li>
+                      <li>Every player except one has gone bankrupt</li>
+                    </ul>
+                  </div>
+                  <div className="property-card-section">
+                    <h4>Net worth</h4>
                     <p>
-                      The benchmark is inspired by simulation based board game analysis,
-                      automated models can play thousands of games to study how dice odds,
-                      player decisions and events shape the length of a match
-                    </p>
-                    <p>
-                      At a four player table {TOTAL_MATCH_TURNS} total turns gives each
-                      player {TOTAL_MATCH_TURNS / 4}, with fewer players each person
-                      receives more turns before the shared count ends
+                      Cash plus the purchase value of every district, route and utility you hold, plus half
+                      the cost of your houses and hotels, mortgaged property counts at its value minus the
+                      mortgage
                     </p>
                   </div>
-
                   <div className="property-card-section">
-                    <h4>Winning</h4>
+                    <h4>Auctions</h4>
                     <p>
-                      In the current version the highest cash balance after turn{' '}
-                      {TOTAL_MATCH_TURNS} wins, future versions will score full net worth
+                      When a player declines an unowned space it goes to auction straight away, bids rise in
+                      steps of {formatRupees(AUCTION_INCREMENT)} and a late bid keeps the clock open a few
+                      seconds longer
                     </p>
                   </div>
-
                   <div className="property-card-section">
-                    <h4>Rajyabhishekam</h4>
+                    <h4>Running short</h4>
                     <p>
-                      Passing or landing on Rajyabhishekam awards{' '}
-                      {formatRupees(START_REWARD)}, it does not start or complete a round
+                      If you cannot pay, buildings are sold and districts mortgaged automatically, and if that
+                      is still not enough you are bankrupt and your estate passes to the player you owed
                     </p>
                   </div>
-
-                  <p className="dice-info-footer">
-                    Every match is a fixed length strategic contest
-                    <br />
-                    Build your fortune wisely
-                  </p>
                 </div>
               </div>
             </div>
@@ -2345,96 +1066,61 @@ export default function BoardGame({ onExit, playerCount = 2, hostPiece = 'lamp',
             <span className={`turn-token seat-${activePlayer.pieceKey}`}>
               <PieceMark piece={activePlayer.pieceKey} variant="token" title={activePlayer.name} />
             </span>
-
             <div>
-              <strong>{activePlayer.name}</strong>
-
+              <strong>{activePlayer.id === myPlayerId ? 'Your turn' : activePlayer.name}</strong>
               <span>
-                {activePlayer.id === 'p1'
-                  ? 'The court awaits your decision'
-                  : `${activePlayer.name} is making a move`}
+                {state.gameOver
+                  ? 'The match is over'
+                  : activePlayer.id === myPlayerId
+                    ? 'The court awaits your decision'
+                    : `${kindLabel(activePlayer)} is making a move`}
               </span>
             </div>
           </div>
 
           <div
-            className={`dice-display ${
-              isRolling ? 'dice-display--rolling' : ''
-            }`}
+            className={`dice-display ${state.rolling ? 'dice-display--rolling' : ''}`}
             aria-live="polite"
-            aria-label={
-              dice1 !== null && dice2 !== null
-                ? `Rolled ${dice1} and ${dice2}, total ${dice1 + dice2}`
-                : 'Dice ready'
-            }
+            aria-label={state.dice ? `Rolled ${state.dice[0]} and ${state.dice[1]}` : 'Dice ready'}
           >
             <div className="dice-pair">
-              <DieFace value={dice1} />
-              <DieFace value={dice2} />
+              <DieFace value={state.dice?.[0]} />
+              <DieFace value={state.dice?.[1]} />
             </div>
-
             <span className="dice-total">
-              {dice1 !== null && dice2 !== null ? `Total ${dice1 + dice2}` : 'Ready to roll'}
+              {state.dice ? `Total ${state.dice[0] + state.dice[1]}` : state.rolling ? 'Rolling' : 'Ready to roll'}
             </span>
           </div>
 
           <div className="dice-info-row">
             <p className="dice-transparency-label">Secure roll by Web Crypto</p>
-            <button
-              type="button"
-              className="dice-info-button"
-              onClick={() => setShowDiceInfo(true)}
-              aria-label="Learn how the dice work"
-              title="Learn how the dice work"
-            >
+            <button type="button" className="dice-info-button" onClick={() => setSheet('dice')}>
               How the dice work
             </button>
           </div>
 
           <GoldButton
-            loading={isRolling || isMoving}
-            disabled={gameOver || activePlayer.id !== 'p1' || isMoving}
-            onClick={rollDiceHandler}
+            loading={isMyTurn && state.busy && !state.gameOver}
+            disabled={!canRoll}
+            onClick={() => act({ type: 'roll' })}
           >
-            {gameOver
+            {state.gameOver
               ? 'Match complete'
-              : activePlayer.id === 'p1'
-                ? 'Roll the dice'
-                : `Awaiting ${activePlayer.name}`}
+              : !amAlive
+                ? 'You are bankrupt'
+                : isMyTurn
+                  ? 'Roll the dice'
+                  : `Waiting for ${activePlayer.name}`}
           </GoldButton>
 
-          {gameOver && (
-            <div className="match-result" role="status" aria-live="polite">
-              <p className="match-result-label">
-                Match complete after {TOTAL_MATCH_TURNS} turns
-              </p>
-
-              {matchResult.isTie ? (
-                <>
-                  <strong className="match-result-winner">Tie</strong>
-                  <p className="match-result-detail">
-                    {matchResult.winners.map((p) => p.name).join(' and ')} finish
-                    level at {formatCurrency(matchResult.winningBalance)}
-                  </p>
-                </>
-              ) : (
-                <>
-                  <strong className="match-result-winner">
-                    {matchResult.winners[0].name === 'You'
-                      ? 'You win'
-                      : `${matchResult.winners[0].name} wins`}
-                  </strong>
-                  <p className="match-result-detail">
-                    Highest balance {formatCurrency(matchResult.winningBalance)}
-                  </p>
-                </>
-              )}
-            </div>
+          {state.gameOver && !showResults && (
+            <button type="button" className="text-link results-reopen" onClick={() => setShowResults(true)}>
+              Show final standings <span aria-hidden="true">›</span>
+            </button>
           )}
 
           <p className="turn-tip">
-            Tap any district, route or utility on the board to see its rent and
-            building costs
+            Tap any district, route or utility on the board to see its owner, rent and building costs
           </p>
         </aside>
       </section>

@@ -30,7 +30,7 @@ const tips = [
   {
     icon: 'chart',
     title: 'Watch the turn counter',
-    text: `The richest purse after turn ${TOTAL_MATCH_TURNS} wins, so late spending must pay for itself fast`,
+    text: `The highest net worth after turn ${TOTAL_MATCH_TURNS} wins, so property counts as much as cash in the final stretch`,
   },
 ];
 

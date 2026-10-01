@@ -40,12 +40,12 @@ export default function Footer({ onNavigate, onPlay, onMusicToggle, musicEnabled
             player 62
           </li>
           <li>
-            The current version settles the winner on cash in hand after the final turn,
-            with full net worth scoring planned for a later season
+            The winner is the player with the highest total net worth, cash plus the value
+            of every property held, when the turns run out or everyone else is bankrupt
           </li>
           <li>
-            Joining a friend by room code is on the way, until then every room is played
-            against AI opponents on this device
+            Friends join by room code over a direct browser to browser connection, premium AI
+            opponents use your own Claude API key, which stays in your browser's memory
           </li>
         </ol>
 
