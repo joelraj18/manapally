@@ -2,7 +2,9 @@
 
 .global-nav {
   position: relative;
-  z-index: 20;
+  /* Above the sticky local nav, so the sound pop-up that drops out of this
+     bar is never covered by the bar beneath it */
+  z-index: 40;
   height: 44px;
   background: rgba(245, 246, 241, 0.92);
 }
@@ -18,7 +20,6 @@
 }
 
 .global-nav-home,
-.global-nav-sound,
 .global-nav-links button {
   display: inline-flex;
   align-items: center;
@@ -56,41 +57,6 @@
 
 .global-nav-links button:hover {
   color: var(--ink);
-}
-
-.global-nav-sound {
-  justify-content: center;
-  width: 32px;
-  height: 32px;
-  border-radius: 50%;
-  transition: background 0.3s var(--ease);
-}
-
-.global-nav-sound:hover {
-  background: rgba(29, 29, 31, 0.06);
-}
-
-.nav-icon {
-  width: 18px;
-  height: 18px;
-  fill: none;
-  stroke: currentColor;
-  stroke-width: 1.6;
-  stroke-linecap: round;
-  stroke-linejoin: round;
-}
-
-.nav-icon > path:first-child {
-  fill: currentColor;
-}
-
-.global-nav-sound[aria-pressed='true'] {
-  color: var(--accent);
-}
-
-.global-nav-sound[aria-pressed='true'] .nav-icon-wave {
-  animation: pulse 2.4s var(--ease) infinite;
-  transform-origin: 12px 12px;
 }
 
 /* Ribbon: one line of helpful news under the global bar */

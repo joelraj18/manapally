@@ -308,3 +308,58 @@ describe('rules audit', () => {
     expect(maxBuilds).toBeGreaterThan(0);
   }, 30000);
 });
+
+describe('ending the game by agreement', () => {
+  test('a lone human against computers ends the game straight away', () => {
+    const engine = new GameEngine({ players: seats(['human', 'bot']), timing: FAST });
+    engine.state.deeds = { 39: { owner: 'p2', houses: 0, hotel: false, mortgaged: false } };
+    expect(engine.proposeEnd('p2')).toBe(false); // computers cannot propose
+    expect(engine.proposeEnd('p1')).toBe(true);
+    expect(engine.state.gameOver.reason).toBe('agreed');
+    expect(engine.state.gameOver.winners).toEqual(['p2']); // net worth includes the boulevard
+    engine.destroy();
+  });
+
+  test('every human must agree, and one no keeps the game going', () => {
+    const engine = new GameEngine({ players: seats(['human', 'human', 'human']), timing: FAST });
+    engine.proposeEnd('p1');
+    engine.voteEnd('p2', true);
+    expect(engine.state.gameOver).toBe(null);
+    engine.voteEnd('p3', false);
+    expect(engine.state.endVote).toBe(null);
+
+    engine.proposeEnd('p2');
+    engine.voteEnd('p1', true);
+    engine.voteEnd('p3', true);
+    expect(engine.state.gameOver.reason).toBe('agreed');
+    expect(engine.voteEnd('p1', true)).toBe(false);
+    engine.destroy();
+  });
+
+  test('a vote that passes mid turn ends the game when the turn finishes', async () => {
+    const queue = [2, 2, 1, 3];
+    const engine = new GameEngine({ players: seats(['human', 'human']), timing: FAST, rollDie: () => queue.shift() ?? 1 });
+    const turn = engine.playTurn('p1');
+    engine.proposeEnd('p1');
+    engine.voteEnd('p2', true);
+    expect(engine.state.gameOver).toBe(null);
+    expect(engine.state.endVote.passed).toBe(true);
+    await new Promise((r) => setTimeout(r, 30));
+    if (engine.state.purchaseOffer) engine.resolvePurchase('p1', false);
+    await turn;
+    expect(engine.state.gameOver.reason).toBe('agreed');
+    expect(engine.state.positions.p1).toBe(4); // the doubles reroll was skipped
+    engine.destroy();
+  });
+
+  test('a player leaving removes them from the vote', () => {
+    const players = seats(['human', 'human']);
+    players[1].clientId = 'guest';
+    const engine = new GameEngine({ players, timing: FAST });
+    engine.proposeEnd('p1');
+    expect(engine.state.gameOver).toBe(null);
+    engine.replaceWithBot('p2');
+    expect(engine.state.gameOver.reason).toBe('agreed');
+    engine.destroy();
+  });
+});

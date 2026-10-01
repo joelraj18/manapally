@@ -372,18 +372,17 @@
   line-height: 1.5;
 }
 
-/* Volume control */
+/* Sound mixer: one button, a pop-up with music and effects channels */
 
-.volume-control {
+.sound-mixer {
+  position: relative;
   display: inline-flex;
-  align-items: center;
-  gap: 6px;
 }
 
-.volume-toggle {
+.sound-mixer-button {
   display: grid;
-  width: 32px;
-  height: 32px;
+  width: 34px;
+  height: 34px;
   padding: 0;
   place-items: center;
   color: var(--ink-secondary);
@@ -391,18 +390,23 @@
   border: 0;
   border-radius: 50%;
   cursor: pointer;
-  transition: background 0.3s var(--ease), color 0.3s var(--ease);
+  transition: background 0.3s var(--ease), color 0.3s var(--ease), transform 0.3s var(--ease);
 }
 
-.volume-toggle:hover {
-  background: rgba(29, 29, 31, 0.06);
+.sound-mixer-button:hover,
+.sound-mixer--open .sound-mixer-button {
+  background: rgba(29, 29, 31, 0.07);
 }
 
-.volume-control--on .volume-toggle {
+.sound-mixer-button:active {
+  transform: scale(0.92);
+}
+
+.sound-mixer-button--on {
   color: var(--accent);
 }
 
-.volume-toggle svg {
+.sound-mixer-button svg {
   width: 19px;
   height: 19px;
   fill: none;
@@ -412,49 +416,181 @@
   stroke-linejoin: round;
 }
 
-.volume-toggle .volume-icon-body {
+.sound-mixer-button .mixer-icon-body {
   fill: currentColor;
 }
 
-.volume-slider {
-  width: 78px;
-  height: 4px;
-  margin: 0;
-  background: linear-gradient(90deg, var(--accent) var(--level), rgba(118, 128, 100, 0.25) var(--level));
-  border-radius: 4px;
-  outline: none;
-  cursor: pointer;
-  appearance: none;
-  -webkit-appearance: none;
+.sound-mixer-panel {
+  position: absolute;
+  z-index: 80;
+  top: calc(100% + 10px);
+  right: -8px;
+  display: grid;
+  gap: 14px;
+  width: 280px;
+  padding: 16px 16px 18px;
+  background: rgba(255, 255, 255, 0.94);
+  border-radius: 20px;
+  box-shadow: 0 22px 50px rgba(29, 35, 22, 0.2), 0 0 0 1px var(--hairline);
+  opacity: 0;
+  pointer-events: none;
+  transform: translateY(-6px) scale(0.96);
+  transform-origin: top right;
+  visibility: hidden;
+  transition:
+    opacity 0.28s var(--ease),
+    transform 0.4s var(--ease-spring),
+    visibility 0s linear 0.4s;
+  backdrop-filter: saturate(180%) blur(20px);
+  -webkit-backdrop-filter: saturate(180%) blur(20px);
 }
 
-.volume-slider::-webkit-slider-thumb {
-  width: 14px;
-  height: 14px;
+.sound-mixer--left .sound-mixer-panel {
+  right: auto;
+  left: -8px;
+  transform-origin: top left;
+}
+
+.sound-mixer--open .sound-mixer-panel {
+  opacity: 1;
+  pointer-events: auto;
+  transform: none;
+  visibility: visible;
+  transition:
+    opacity 0.28s var(--ease),
+    transform 0.4s var(--ease-spring),
+    visibility 0s;
+}
+
+.sound-mixer-title {
+  color: var(--ink);
+  font-size: 0.95rem;
+  font-weight: 600;
+}
+
+.mixer-channel {
+  display: grid;
+  gap: 10px;
+  padding: 12px 12px 14px;
+  background: var(--canvas);
+  border-radius: 14px;
+  transition: background 0.3s var(--ease);
+}
+
+.mixer-channel--on {
+  background: var(--sage-50);
+}
+
+.mixer-channel-head {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 12px;
+}
+
+.mixer-channel-head > div {
+  display: grid;
+  gap: 1px;
+}
+
+.mixer-label {
+  font-size: 0.9rem;
+  font-weight: 600;
+}
+
+.mixer-hint {
+  color: var(--ink-tertiary);
+  font-size: 0.74rem;
+  font-variant-numeric: tabular-nums;
+}
+
+/* iOS style switch */
+.mixer-switch {
+  position: relative;
+  flex: 0 0 auto;
+  width: 44px;
+  height: 26px;
+  padding: 0;
+  background: rgba(120, 120, 128, 0.24);
+  border: 0;
+  border-radius: 13px;
+  cursor: pointer;
+  transition: background 0.3s var(--ease);
+}
+
+.mixer-switch span {
+  position: absolute;
+  top: 2px;
+  left: 2px;
+  width: 22px;
+  height: 22px;
+  background: #ffffff;
+  border-radius: 50%;
+  box-shadow: 0 2px 5px rgba(0, 0, 0, 0.2);
+  transition: transform 0.35s var(--ease-spring);
+}
+
+.mixer-switch[aria-checked='true'] {
+  background: var(--accent);
+}
+
+.mixer-switch[aria-checked='true'] span {
+  transform: translateX(18px);
+}
+
+.mixer-slider {
+  width: 100%;
+  height: 6px;
+  margin: 0;
+  background: linear-gradient(90deg, var(--accent) var(--level), rgba(118, 128, 100, 0.22) var(--level));
+  border-radius: 6px;
+  outline: none;
+  cursor: pointer;
+  opacity: 0.55;
+  appearance: none;
+  -webkit-appearance: none;
+  transition: opacity 0.3s var(--ease);
+}
+
+.mixer-channel--on .mixer-slider {
+  opacity: 1;
+}
+
+.mixer-slider::-webkit-slider-thumb {
+  width: 20px;
+  height: 20px;
   background: #ffffff;
   border: 0;
   border-radius: 50%;
-  box-shadow: 0 1px 4px rgba(0, 0, 0, 0.3);
+  box-shadow: 0 1px 5px rgba(0, 0, 0, 0.28);
   -webkit-appearance: none;
   transition: transform 0.2s var(--ease);
 }
 
-.volume-slider::-moz-range-thumb {
-  width: 14px;
-  height: 14px;
+.mixer-slider::-moz-range-thumb {
+  width: 20px;
+  height: 20px;
   background: #ffffff;
   border: 0;
   border-radius: 50%;
-  box-shadow: 0 1px 4px rgba(0, 0, 0, 0.3);
+  box-shadow: 0 1px 5px rgba(0, 0, 0, 0.28);
 }
 
-.volume-slider:hover::-webkit-slider-thumb,
-.volume-slider:focus-visible::-webkit-slider-thumb {
-  transform: scale(1.15);
+.mixer-slider:active::-webkit-slider-thumb,
+.mixer-slider:focus-visible::-webkit-slider-thumb {
+  transform: scale(1.12);
 }
 
+/* On phones the pop-up spans the screen just under the top bar instead of
+   hanging off the button, so it can never run off the edge */
 @media (max-width: 620px) {
-  .volume-slider {
-    width: 56px;
+  .sound-mixer-panel,
+  .sound-mixer--left .sound-mixer-panel {
+    position: fixed;
+    top: 58px;
+    right: 12px;
+    left: 12px;
+    width: auto;
+    transform-origin: top center;
   }
 }

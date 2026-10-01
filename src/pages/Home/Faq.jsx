@@ -20,7 +20,7 @@ const questions = [
   },
   {
     q: 'How is the winner decided?',
-    a: `The highest total net worth wins, cash plus the value of every property held, when all ${TOTAL_MATCH_TURNS} turns are played or when every other player is bankrupt`,
+    a: `The highest total net worth wins, cash plus the value of every property held, when all ${TOTAL_MATCH_TURNS} turns are played, when every other player is bankrupt, or when everyone at the table agrees to end the game`,
   },
   {
     q: 'Can I play on my phone?',
@@ -28,7 +28,7 @@ const questions = [
   },
   {
     q: 'How do I turn the music on or off?',
-    a: 'Use the speaker button at the top of the home page or inside the game, the soundtrack stays off until you choose to play it',
+    a: 'Tap the speaker button at the top of the home page or the game to open the sound panel, music and sound effects each have their own switch and volume slider',
   },
 ];
 
