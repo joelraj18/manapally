@@ -99,13 +99,19 @@ export default function Game() {
     };
   }, [session, showNotice]);
 
-  // Closing the tab closes the room for everyone at the table.
+  // Closing the tab before the match closes the room. Once a match is under
+  // way it only drops this player's connection, so they can rejoin with
+  // their Player ID and pick up exactly where they were.
   useEffect(() => {
     if (!session) {
       return undefined;
     }
 
-    const onUnload = () => session.close();
+    const onUnload = () => {
+      if (!session.started) {
+        session.close();
+      }
+    };
     window.addEventListener('pagehide', onUnload);
     return () => window.removeEventListener('pagehide', onUnload);
   }, [session]);
@@ -164,6 +170,7 @@ export default function Game() {
         key={match.gameId}
         players={match.players}
         myPlayerId={match.myPlayerId}
+        resume={match.resume}
         session={session}
         audio={audio}
         onAudio={updateAudio}
@@ -178,9 +185,16 @@ export default function Game() {
       <Lobby
         initialPiece={lobbyPiece}
         onBack={() => setCurrentView('home')}
-        onSession={(next) => {
+        onSession={(next, { resume } = {}) => {
           setSession(next);
-          setCurrentView('waiting');
+
+          // A rejoin goes straight back to the board.
+          if (resume) {
+            setMatch(resume);
+            setCurrentView('board');
+          } else {
+            setCurrentView('waiting');
+          }
         }}
       />
     );

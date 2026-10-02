@@ -19,17 +19,33 @@ const nextSteps = [
 const JOIN_ERRORS = {
   'not-found': 'No room found with that code, check it with your host',
   full: 'That table is already full',
-  started: 'That match has already started',
+  started: 'That match has already started, use Rejoin with your Player ID if you were playing',
+  'unknown-player': 'That Player ID is not seated in this match, check it and the room code',
+  'not-ready': 'The host is reopening the room, try again in a few seconds',
   removed: 'The host removed you from that table',
   network: 'Could not reach the room service, check your connection and try again',
 };
 
+// The last seat this device played, so a dropped player finds both codes
+// already filled in. Read directly so the room module still loads lazily.
+const lastSeat = () => {
+  try {
+    return JSON.parse(window.localStorage.getItem('manapally-seat') || 'null') || {};
+  } catch {
+    return {};
+  }
+};
+
+const codeInput = (value) => value.toUpperCase().replace(/[^A-Z0-9]/g, '').slice(0, 6);
+
 export default function Lobby({ onBack, onSession, initialPiece = 'lamp' }) {
   const [displayName, setDisplayName] = useState('');
   const [roomCode, setRoomCode] = useState('');
+  const [rejoinRoom, setRejoinRoom] = useState(() => lastSeat().code || '');
+  const [rejoinId, setRejoinId] = useState(() => lastSeat().playerCode || '');
   const [selectedToken, setSelectedToken] = useState(PIECES[initialPiece] ? initialPiece : 'lamp');
   const [message, setMessage] = useState('');
-  const [busy, setBusy] = useState(null); // 'create' | 'join' | null
+  const [busy, setBusy] = useState(null); // 'create' | 'join' | 'rejoin' | null
 
   const selectedPlayer = playerOptions.find((player) => player.id === selectedToken) || playerOptions[0];
 
@@ -79,6 +95,33 @@ export default function Lobby({ onBack, onSession, initialPiece = 'lamp' }) {
       const { default: RoomSession } = await loadRooms();
       const session = await RoomSession.join({ code: roomCode, name: displayName, pieceKey: selectedToken });
       onSession(session);
+    } catch (error) {
+      showMessage(JOIN_ERRORS[error.message] || JOIN_ERRORS.network);
+      setBusy(null);
+    }
+  };
+
+  // Back into a match under way with a Player ID. On the device that hosted
+  // it, the saved match reopens the room itself; anywhere else it asks the
+  // host for the seat.
+  const rejoinMatch = async () => {
+    if (busy) return;
+
+    if (rejoinRoom.length !== 6 || rejoinId.length !== 6) {
+      showMessage('Enter the 6 character room code and your 6 character Player ID');
+      return;
+    }
+
+    setBusy('rejoin');
+
+    try {
+      const { default: RoomSession, savedHostGame } = await loadRooms();
+      const hosted = savedHostGame();
+      const session =
+        hosted && hosted.code === rejoinRoom && hosted.players?.[0]?.code === rejoinId
+          ? await RoomSession.resumeHost(hosted)
+          : await RoomSession.join({ code: rejoinRoom, rejoin: rejoinId, pieceKey: selectedToken });
+      onSession(session, { resume: session.startConfig });
     } catch (error) {
       showMessage(JOIN_ERRORS[error.message] || JOIN_ERRORS.network);
       setBusy(null);
@@ -174,7 +217,7 @@ export default function Lobby({ onBack, onSession, initialPiece = 'lamp' }) {
             ))}
           </div>
 
-          <GoldButton onClick={createRoom} loading={busy === 'create'} disabled={busy === 'join'}>
+          <GoldButton onClick={createRoom} loading={busy === 'create'} disabled={Boolean(busy && busy !== 'create')}>
             Create a private room
           </GoldButton>
 
@@ -191,12 +234,49 @@ export default function Lobby({ onBack, onSession, initialPiece = 'lamp' }) {
               aria-label="Room code"
               autoComplete="off"
               placeholder="Room code"
-              onChange={(event) => setRoomCode(event.target.value.toUpperCase().replace(/[^A-Z0-9]/g, ''))}
+              onChange={(event) => setRoomCode(codeInput(event.target.value))}
               onKeyDown={(event) => event.key === 'Enter' && joinRoom()}
             />
 
-            <GoldButton variant="ghost" onClick={joinRoom} loading={busy === 'join'} disabled={busy === 'create'}>
+            <GoldButton variant="ghost" onClick={joinRoom} loading={busy === 'join'} disabled={Boolean(busy && busy !== 'join')}>
               Join room
+            </GoldButton>
+          </div>
+
+          <div className="lobby-divider">
+            <span>or rejoin a match you left</span>
+          </div>
+
+          <p className="rejoin-help">
+            Your Player ID is shown under the dice during a match, enter it with the room code to take
+            back your seat with your cash, properties and place on the board
+          </p>
+
+          <div className="join-room-row rejoin-row">
+            <input
+              className="lobby-input room-code-input"
+              type="text"
+              value={rejoinRoom}
+              maxLength="6"
+              aria-label="Room code to rejoin"
+              autoComplete="off"
+              placeholder="Room code"
+              onChange={(event) => setRejoinRoom(codeInput(event.target.value))}
+            />
+            <input
+              className="lobby-input room-code-input"
+              type="text"
+              value={rejoinId}
+              maxLength="6"
+              aria-label="Your Player ID"
+              autoComplete="off"
+              placeholder="Player ID"
+              onChange={(event) => setRejoinId(codeInput(event.target.value))}
+              onKeyDown={(event) => event.key === 'Enter' && rejoinMatch()}
+            />
+
+            <GoldButton variant="ghost" onClick={rejoinMatch} loading={busy === 'rejoin'} disabled={Boolean(busy && busy !== 'rejoin')}>
+              Rejoin
             </GoldButton>
           </div>
         </div>

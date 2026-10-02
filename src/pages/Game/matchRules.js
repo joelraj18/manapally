@@ -3,7 +3,7 @@
 // A match is a fixed 248 completed player turns, regardless of how many players
 // sit at the table. One "turn" is a single player's completed dice roll,
 // movement, pass-start resolution, and destination resolution. Nothing else —
-// including passing or landing on Rajyabhishekam — advances the counter.
+// including passing or landing on Go — advances the counter.
 
 import { netWorth } from './estate';
 
@@ -49,7 +49,7 @@ export const turnsPerSeat = (playerCount) =>
     (seat < TOTAL_MATCH_TURNS % playerCount ? 1 : 0),
   );
 
-// Rajyabhishekam reward. Awards ₹2,00,000 once per valid crossing/landing and
+// Go reward. Awards ₹2,00,000 once per valid crossing/landing and
 // never touches the match clock.
 export const awardStartReward = (balance, crossedStart) =>
   crossedStart ? balance + START_REWARD : balance;

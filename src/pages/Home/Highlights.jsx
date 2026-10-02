@@ -10,7 +10,7 @@ const stats = [
   { value: String(BOARD_SPACES.length), label: 'Spaces around the board' },
   { value: String(TOTAL_MATCH_TURNS), label: 'Turns in every match' },
   { value: toLakh(STARTING_BALANCE), label: 'Starting purse for each player' },
-  { value: toLakh(START_REWARD), label: 'Collected at Rajyabhishekam' },
+  { value: toLakh(START_REWARD), label: 'Collected for passing Go' },
 ];
 
 const features = [
