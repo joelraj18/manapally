@@ -27,6 +27,10 @@ const questions = [
     a: 'Your seat is kept, the computer plays it for you until you return, open Manapally, choose Rejoin in the lobby and enter the room code with the Player ID shown under the dice',
   },
   {
+    q: 'Can I trade with other players?',
+    a: 'Yes, at any time, even on another player\'s turn or from Jail, offer any mix of properties, cash and Get Out of Jail Free cards, both sides must give something, buildings must be sold before a colour family is traded, and a mortgaged property costs its new owner 10% of the mortgage straight away or the full payoff',
+  },
+  {
     q: 'How is the winner decided?',
     a: `The highest total net worth wins, cash plus the value of every property held, when all ${TOTAL_MATCH_TURNS} turns are played, when every other player is bankrupt, or when everyone at the table agrees to end the game`,
   },

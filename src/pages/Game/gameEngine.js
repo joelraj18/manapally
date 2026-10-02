@@ -51,6 +51,95 @@ const BOT_RESERVE = 120000;
 
 const CANCELLED = Symbol('cancelled');
 
+// ------------------------------------------------------------------ trading
+
+export const TRADE_PARDON_VALUE = 50000;
+const MAX_TRADES = 6;
+const MORTGAGE_FEE = 0.1;
+
+const cleanSide = (side = {}) => ({
+  cash: Math.max(0, Math.floor(Number(side.cash) || 0)),
+  deeds: [...new Set((Array.isArray(side.deeds) ? side.deeds : []).map(Number))].filter((id) => BOARD_SPACES[id]),
+  pardons: Math.max(0, Math.floor(Number(side.pardons) || 0)),
+});
+
+// What it costs the new owner to take on a mortgaged deed now: 10% of the
+// mortgage value to keep it mortgaged, or the full payoff to lift it.
+export const mortgageFee = (spaceId, choice) =>
+  choice === 'lift'
+    ? Estate.unmortgageCost(spaceId, BOARD_SPACES)
+    : Math.ceil(Estate.mortgageValue(spaceId, BOARD_SPACES) * MORTGAGE_FEE);
+
+// Lifting a mortgage later: a deed whose 10% fee was paid on a trade only
+// owes the mortgage value itself.
+export const liftCost = (deed, spaceId) =>
+  deed?.interestPaid ? Estate.mortgageValue(spaceId, BOARD_SPACES) : Estate.unmortgageCost(spaceId, BOARD_SPACES);
+
+export const familyHasBuildings = (deeds, spaceId) => {
+  const space = BOARD_SPACES[spaceId];
+
+  if (space.type !== 'property') {
+    return false;
+  }
+
+  return Estate.getGroupSpaceIds(spaceId, BOARD_SPACES).some((id) => deeds[id] && (deeds[id].houses > 0 || deeds[id].hotel));
+};
+
+// Fees each side owes the bank for mortgaged deeds they receive.
+export const tradeFees = (state, trade, mortgageChoice = {}) => {
+  const fee = (ids) =>
+    ids.reduce(
+      (sum, id) => sum + (state.deeds[id]?.mortgaged ? mortgageFee(id, mortgageChoice[id] || 'interest') : 0),
+      0,
+    );
+
+  return { from: fee(trade.get.deeds), to: fee(trade.give.deeds) };
+};
+
+// Every reason a trade cannot go ahead, shared by the engine and the trade
+// sheets so both always agree. Returns null when the trade is fine.
+export const tradeProblem = (state, trade, mortgageChoice = {}) => {
+  const from = state.players.find((player) => player.id === trade.from);
+  const to = state.players.find((player) => player.id === trade.to);
+
+  if (state.gameOver) return 'The match is over';
+  if (!from || !to || from.id === to.id) return 'Choose another player to trade with';
+  if (state.bankrupt[from.id] || state.bankrupt[to.id]) return 'Bankrupt players cannot trade';
+
+  const { give, get } = trade;
+  const hasAsset = (side) => side.deeds.length > 0 || side.pardons > 0;
+  const isEmpty = (side) => !hasAsset(side) && side.cash <= 0;
+
+  if (isEmpty(give) || isEmpty(get)) return 'Both players must give something, gifts and loans are not allowed';
+  if (!hasAsset(give) && !hasAsset(get)) return 'A trade must include a property or a Get Out of Jail Free card';
+
+  const checkSide = (side, owner) => {
+    for (const id of side.deeds) {
+      const deed = state.deeds[id];
+      if (!deed || deed.owner !== owner.id) return `${owner.name} no longer owns ${BOARD_SPACES[id].name}`;
+      if (familyHasBuildings(state.deeds, id)) return `Sell the buildings in the ${BOARD_SPACES[id].name} family first`;
+      if (state.auction?.spaceId === id) return `${BOARD_SPACES[id].name} is being auctioned`;
+    }
+
+    if (side.cash > (state.balances[owner.id] || 0)) return `${owner.name} does not have that much cash`;
+    if (side.pardons > (state.pardons[owner.id] || 0)) return `${owner.name} does not hold that Get Out of Jail Free card`;
+    return null;
+  };
+
+  const problem = checkSide(give, from) || checkSide(get, to);
+
+  if (problem) return problem;
+
+  // Mortgage fees are paid out of the cash each side holds after the swap.
+  const fees = tradeFees(state, trade, mortgageChoice);
+  const fromCash = state.balances[from.id] - give.cash + get.cash;
+  const toCash = state.balances[to.id] - get.cash + give.cash;
+
+  if (fromCash < fees.from) return `${from.name} cannot cover the mortgage fees`;
+  if (toCash < fees.to) return `${to.name} cannot cover the mortgage fees`;
+  return null;
+};
+
 export const formatRupees = (amount) =>
   `₹${Math.round(amount).toLocaleString('en-IN')}`;
 
@@ -113,6 +202,8 @@ export const createInitialState = (players) => {
     purchaseOffer: null,
     auction: null,
     endVote: null, // { proposerId, agreed: [ids], passed }
+    trades: [], // pending offers between players
+    tradeCounter: 0,
     gameOver: null,
     sfx: null,
   };
@@ -175,6 +266,11 @@ export default class GameEngine {
   start() {
     this.emit();
     this.schedule();
+
+    // Offers waiting on a computer seat, for example after a host resume.
+    (this.state.trades || [])
+      .filter((trade) => this.isAuto(trade.to))
+      .forEach((trade) => this.later(() => this.botAnswerTrade(trade.id), this.timing.botDelay));
   }
 
   // A saved snapshot taken between rolls, made safe to continue from: any
@@ -650,7 +746,7 @@ export default class GameEngine {
     Object.keys(this.state.deeds)
       .filter((id) => this.state.deeds[id].owner === playerId && this.state.deeds[id].mortgaged)
       .forEach((id) => {
-        const cost = Estate.unmortgageCost(id, BOARD_SPACES);
+        const cost = liftCost(this.state.deeds[id], id);
 
         if (this.state.balances[playerId] - cost >= BUILD_RESERVE * 2 && this.manageProperty(playerId, id, 'unmortgage')) {
           say(`${name} lifted the mortgage on ${BOARD_SPACES[id].name}`);
@@ -738,6 +834,7 @@ export default class GameEngine {
     this.set({
       gameOver: { reason, standings, winners, turns: this.state.turnCount },
       endVote: null,
+      trades: [],
       purchaseOffer: null,
       auction: null,
       drawnCard: null,
@@ -1400,6 +1497,7 @@ export default class GameEngine {
       this.pendingPurchase.resolve(false);
     }
 
+    this.pruneTrades();
     this.checkEndVote();
   }
 
@@ -1419,6 +1517,17 @@ export default class GameEngine {
 
   // Owner actions from the property sheet. Each returns true when applied.
   manageProperty(playerId, spaceId, action) {
+    const applied = this.applyManage(playerId, Number(spaceId), action);
+
+    // A new house can make a pending offer impossible.
+    if (applied && action === 'build') {
+      this.pruneTrades();
+    }
+
+    return applied;
+  }
+
+  applyManage(playerId, spaceId, action) {
     const { state } = this;
     const deed = state.deeds[spaceId];
 
@@ -1477,14 +1586,14 @@ export default class GameEngine {
       }
 
       case 'unmortgage': {
-        const cost = Estate.unmortgageCost(spaceId, BOARD_SPACES);
+        const cost = liftCost(deed, spaceId);
 
         if (!deed.mortgaged || balance < cost) {
           return false;
         }
 
         this.set({
-          deeds: { ...state.deeds, [spaceId]: { ...deed, mortgaged: false } },
+          deeds: { ...state.deeds, [spaceId]: { ...deed, mortgaged: false, interestPaid: undefined } },
           balances: { ...state.balances, [playerId]: balance - cost },
         });
         return true;
@@ -1493,6 +1602,236 @@ export default class GameEngine {
       default:
         return false;
     }
+  }
+
+  // -------------------------------------------------------------- trading
+
+  // Offer a deal to another player, at any time, on any turn, even in Jail.
+  proposeTrade(fromId, offer = {}) {
+    const from = this.player(fromId);
+
+    if (!from || from.kind !== 'human' || from.away) {
+      return false;
+    }
+
+    const trade = {
+      id: (this.state.tradeCounter || 0) + 1,
+      from: fromId,
+      to: offer.to,
+      give: cleanSide(offer.give),
+      get: cleanSide(offer.get),
+      mortgageChoice: offer.mortgageChoice && typeof offer.mortgageChoice === 'object' ? { ...offer.mortgageChoice } : {},
+      createdAt: Date.now(),
+    };
+    const trades = (this.state.trades || []).filter((entry) => !(entry.from === fromId && entry.to === trade.to));
+
+    if (tradeProblem(this.state, trade, trade.mortgageChoice) || trades.length >= MAX_TRADES) {
+      return false;
+    }
+
+    const to = this.player(trade.to);
+    this.set({
+      trades: [...trades, trade],
+      tradeCounter: trade.id,
+      ...this.record(`${from.name} offered ${to.name} a trade`, fromId),
+    });
+    this.chat(`${from.name} offered ${to.name} a trade`);
+
+    if (this.isAuto(to.id)) {
+      this.later(() => this.botAnswerTrade(trade.id), this.timing.botDelay);
+    }
+
+    return true;
+  }
+
+  cancelTrade(playerId, tradeId) {
+    const trade = this.findTrade(tradeId);
+
+    if (!trade || trade.from !== playerId) {
+      return false;
+    }
+
+    this.dropTrade(tradeId);
+    this.chat(`${this.nameOf(playerId)} withdrew a trade offer to ${this.nameOf(trade.to)}`);
+    return true;
+  }
+
+  findTrade(tradeId) {
+    return (this.state.trades || []).find((trade) => trade.id === Number(tradeId));
+  }
+
+  dropTrade(tradeId) {
+    this.set({ trades: (this.state.trades || []).filter((trade) => trade.id !== Number(tradeId)) });
+  }
+
+  // The player the offer was made to accepts or declines. `mortgageChoice`
+  // says, for each mortgaged deed they receive, whether to pay the 10% fee
+  // now ('interest') or lift the mortgage straight away ('lift').
+  respondTrade(playerId, tradeId, accept, mortgageChoice = {}) {
+    const trade = this.findTrade(tradeId);
+
+    if (!trade || trade.to !== playerId) {
+      return false;
+    }
+
+    if (!accept) {
+      this.dropTrade(trade.id);
+      this.chat(`${this.nameOf(playerId)} declined the trade from ${this.nameOf(trade.from)}`);
+      return true;
+    }
+
+    const choices = { ...trade.mortgageChoice };
+    trade.give.deeds.forEach((id) => {
+      choices[id] = mortgageChoice?.[id] === 'lift' ? 'lift' : 'interest';
+    });
+
+    const problem = tradeProblem(this.state, trade, choices);
+
+    if (problem) {
+      this.dropTrade(trade.id);
+      this.chat(`The trade between ${this.nameOf(trade.from)} and ${this.nameOf(playerId)} fell through, ${problem.charAt(0).toLowerCase()}${problem.slice(1)}`);
+      return false;
+    }
+
+    this.executeTrade(trade, choices);
+    return true;
+  }
+
+  // Swaps everything in one step, then settles mortgage fees with the bank.
+  executeTrade(trade, choices) {
+    const { from, to, give, get } = trade;
+    const balances = { ...this.state.balances };
+    const pardons = { ...this.state.pardons };
+    const deeds = { ...this.state.deeds };
+    const fees = tradeFees(this.state, trade, choices);
+
+    balances[from] += get.cash - give.cash - fees.from;
+    balances[to] += give.cash - get.cash - fees.to;
+    pardons[from] += get.pardons - give.pardons;
+    pardons[to] += give.pardons - get.pardons;
+
+    const move = (ids, owner) =>
+      ids.forEach((id) => {
+        const deed = deeds[id];
+        const lift = deed.mortgaged && choices[id] === 'lift';
+        deeds[id] = {
+          ...deed,
+          owner,
+          mortgaged: deed.mortgaged && !lift,
+          interestPaid: deed.mortgaged && !lift ? true : undefined,
+        };
+      });
+
+    move(give.deeds, to);
+    move(get.deeds, from);
+
+    const describe = (side) =>
+      [
+        ...side.deeds.map((id) => BOARD_SPACES[id].name),
+        side.cash ? formatRupees(side.cash) : null,
+        side.pardons ? `${side.pardons} Get Out of Jail Free card${side.pardons > 1 ? 's' : ''}` : null,
+      ]
+        .filter(Boolean)
+        .join(' and ');
+
+    const text = `${this.nameOf(from)} traded ${describe(give)} to ${this.nameOf(to)} for ${describe(get)}`;
+    this.set({
+      balances,
+      pardons,
+      deeds,
+      trades: (this.state.trades || []).filter((entry) => entry.id !== trade.id),
+      ...this.record(text, from),
+    });
+    this.chat(text);
+    this.sound('propertyBought');
+    this.pruneTrades();
+  }
+
+  // Offers that can no longer happen (a deed changed hands, buildings went
+  // up, someone went bankrupt) are dropped with a note.
+  pruneTrades() {
+    const trades = this.state.trades || [];
+
+    if (trades.length === 0) {
+      return;
+    }
+
+    const keep = trades.filter((trade) => !tradeProblem(this.state, trade, trade.mortgageChoice));
+
+    if (keep.length !== trades.length) {
+      this.set({ trades: keep });
+      trades
+        .filter((trade) => !keep.includes(trade))
+        .forEach((trade) => this.chat(`The trade offer from ${this.nameOf(trade.from)} to ${this.nameOf(trade.to)} no longer works and was withdrawn`));
+    }
+  }
+
+  // How a computer weighs an offer: what it gets against what it gives,
+  // with a premium on completing a colour family and on keeping one whole.
+  botEvaluateTrade(trade) {
+    const me = trade.to;
+    const cash = this.state.balances[me];
+    const valueOf = (id, gaining) => {
+      const space = BOARD_SPACES[id];
+      const deed = this.state.deeds[id];
+      let value = space.price;
+
+      if (deed?.mortgaged) {
+        value -= Estate.mortgageValue(id, BOARD_SPACES) + (gaining ? mortgageFee(id, 'interest') : 0);
+      }
+
+      if (space.type === 'property') {
+        const family = Estate.getGroupSpaceIds(id, BOARD_SPACES);
+        const others = family.filter((other) => other !== id);
+        const ownsRest = others.every((other) => this.state.deeds[other]?.owner === me || trade.give.deeds.includes(other));
+
+        if (ownsRest) {
+          value *= 1.4;
+        }
+      }
+
+      return value;
+    };
+
+    const gain =
+      trade.give.cash +
+      trade.give.pardons * TRADE_PARDON_VALUE +
+      trade.give.deeds.reduce((sum, id) => sum + valueOf(id, true), 0);
+    const loss =
+      trade.get.cash +
+      trade.get.pardons * TRADE_PARDON_VALUE +
+      trade.get.deeds.reduce((sum, id) => sum + valueOf(id, false), 0);
+    const comfortable = cash - trade.get.cash + trade.give.cash;
+    const choices = {};
+
+    trade.give.deeds.forEach((id) => {
+      if (this.state.deeds[id]?.mortgaged) {
+        choices[id] = comfortable - Estate.unmortgageCost(id, BOARD_SPACES) >= BOT_RESERVE * 3 ? 'lift' : 'interest';
+      }
+    });
+
+    const fees = tradeFees(this.state, trade, choices).to;
+    const accept = gain >= loss * 1.1 && comfortable - fees >= BOT_RESERVE;
+    return { accept, choices };
+  }
+
+  botAnswerTrade(tradeId) {
+    const trade = this.findTrade(tradeId);
+
+    if (!trade || this.destroyed) {
+      return;
+    }
+
+    const recipient = this.player(trade.to);
+
+    // Nobody's estate is traded while they are away.
+    if (recipient.away) {
+      this.respondTrade(trade.to, trade.id, false);
+      return;
+    }
+
+    const { accept, choices } = this.botEvaluateTrade(trade);
+    this.respondTrade(trade.to, trade.id, accept, choices);
   }
 
   // ------------------------------------------------------------ end vote
@@ -1595,6 +1934,11 @@ export default class GameEngine {
       if (this.pendingAction?.playerId === playerId) {
         this.pendingAction.finish();
       }
+
+      // Offers to or from someone who dropped out are withdrawn.
+      (this.state.trades || [])
+        .filter((trade) => trade.to === playerId || trade.from === playerId)
+        .forEach((trade) => this.dropTrade(trade.id));
       this.checkEndVote();
     } else {
       this.chat(`${player.name} is back at the table`);

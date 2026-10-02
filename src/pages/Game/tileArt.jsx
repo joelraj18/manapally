@@ -6,8 +6,8 @@
 const ART = {
   go: (
     <>
-      <path className="tile-art-fill" d="M8 30h22v-8l12 12-12 12v-8H8z" />
-      <path d="M8 30h22v-8l12 12-12 12v-8H8z" />
+      <path className="tile-art-fill" d="M40 30H18v-8L6 34l12 12v-8h22z" />
+      <path d="M40 30H18v-8L6 34l12 12v-8h22z" />
       <path className="tile-art-accent" d="M13 17 11 7l6 4 4-7 4 7 6-4-2 10z" />
       <path d="M13 17 11 7l6 4 4-7 4 7 6-4-2 10zM13 21h16" />
     </>
