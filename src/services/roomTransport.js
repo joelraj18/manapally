@@ -123,8 +123,34 @@ const guestWithPeer = (code, handlers) => {
 
 // -------------------------------------------------------- BroadcastChannel
 
+// Posting on a channel that has been closed throws, and a transport may be
+// closed more than once (a failed reconnect closes it, then the next try
+// does again), so every post goes through this guard.
+const safeChannel = (name) => {
+  const channel = new BroadcastChannel(name);
+  let closed = false;
+
+  return {
+    set onmessage(fn) {
+      channel.onmessage = fn;
+    },
+    post(message) {
+      if (!closed) {
+        channel.postMessage(message);
+      }
+    },
+    close() {
+      closed = true;
+      channel.close();
+    },
+    get closed() {
+      return closed;
+    },
+  };
+};
+
 const hostWithChannel = (code, handlers) => {
-  const channel = new BroadcastChannel(`${ID_PREFIX}${code}`);
+  const channel = safeChannel(`${ID_PREFIX}${code}`);
   const guests = new Set();
 
   channel.onmessage = ({ data }) => {
@@ -133,10 +159,10 @@ const hostWithChannel = (code, handlers) => {
     }
 
     if (data.kind === 'probe') {
-      channel.postMessage({ to: data.from, kind: 'here' });
+      channel.post({ to: data.from, kind: 'here' });
     } else if (data.kind === 'join') {
       guests.add(data.from);
-      channel.postMessage({ to: data.from, kind: 'accepted' });
+      channel.post({ to: data.from, kind: 'accepted' });
       handlers.onPeerOpen?.(data.from);
     } else if (data.kind === 'leave') {
       guests.delete(data.from);
@@ -146,18 +172,19 @@ const hostWithChannel = (code, handlers) => {
     }
   };
 
-  const onUnload = () => channel.postMessage({ to: '*', kind: 'host-gone' });
+  const onUnload = () => channel.post({ to: '*', kind: 'host-gone' });
   window.addEventListener('pagehide', onUnload);
 
   return {
     ready: Promise.resolve(),
-    send: (peerId, payload) => channel.postMessage({ to: peerId, kind: 'msg', payload }),
-    broadcast: (payload) => guests.forEach((id) => channel.postMessage({ to: id, kind: 'msg', payload })),
+    send: (peerId, payload) => channel.post({ to: peerId, kind: 'msg', payload }),
+    broadcast: (payload) => guests.forEach((id) => channel.post({ to: id, kind: 'msg', payload })),
     kick: (peerId) => {
       guests.delete(peerId);
-      channel.postMessage({ to: peerId, kind: 'host-gone' });
+      channel.post({ to: peerId, kind: 'host-gone' });
     },
     close: () => {
+      if (channel.closed) return;
       onUnload();
       window.removeEventListener('pagehide', onUnload);
       channel.close();
@@ -166,7 +193,7 @@ const hostWithChannel = (code, handlers) => {
 };
 
 const guestWithChannel = (code, handlers) => {
-  const channel = new BroadcastChannel(`${ID_PREFIX}${code}`);
+  const channel = safeChannel(`${ID_PREFIX}${code}`);
   const id = randomId();
 
   const ready = new Promise((resolve, reject) => {
@@ -178,7 +205,7 @@ const guestWithChannel = (code, handlers) => {
       }
 
       if (data.kind === 'here') {
-        channel.postMessage({ to: 'host', from: id, kind: 'join' });
+        channel.post({ to: 'host', from: id, kind: 'join' });
       } else if (data.kind === 'accepted') {
         clearTimeout(timer);
         resolve();
@@ -189,16 +216,17 @@ const guestWithChannel = (code, handlers) => {
       }
     };
 
-    channel.postMessage({ to: 'host', from: id, kind: 'probe' });
+    channel.post({ to: 'host', from: id, kind: 'probe' });
   });
 
-  const onUnload = () => channel.postMessage({ to: 'host', from: id, kind: 'leave' });
+  const onUnload = () => channel.post({ to: 'host', from: id, kind: 'leave' });
   window.addEventListener('pagehide', onUnload);
 
   return {
     ready,
-    send: (payload) => channel.postMessage({ to: 'host', from: id, kind: 'msg', payload }),
+    send: (payload) => channel.post({ to: 'host', from: id, kind: 'msg', payload }),
     close: () => {
+      if (channel.closed) return;
       onUnload();
       window.removeEventListener('pagehide', onUnload);
       channel.close();

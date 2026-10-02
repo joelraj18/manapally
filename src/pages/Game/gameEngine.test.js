@@ -5,7 +5,7 @@ import * as Estate from './estate';
 
 const FAST = {
   roll: 0, step: 0, afterRoll: 0, card: 0, turnGap: 0, botDelay: 0,
-  auction: 30, auctionExtend: 10, botBidGap: 5, remoteDecision: 50, remoteRoll: 50, advisor: 20,
+  notice: 0, actionWindow: 0, auction: 30, auctionExtend: 10, botBidGap: 5, remoteDecision: 50, advisor: 20,
 };
 
 const seats = (kinds) =>
@@ -72,7 +72,7 @@ describe('game engine', () => {
   }, 30000);
 
   test('a declined purchase goes to auction and the highest bid wins', async () => {
-    const dice = [1, 2]; // 3 steps lands on Satavahana Street (space 3)
+    const dice = [1, 2]; // 3 steps lands on Abids (space 3)
     const engine = new GameEngine({
       players: seats(['human', 'human']),
       timing: { ...FAST, auction: 80 },
@@ -165,10 +165,15 @@ describe('rules audit', () => {
     };
   };
 
-  test('doubles earn another roll in the same turn', async () => {
-    // 2+2 lands on Kandayam (tax), then 1+3 lands on Hoysala Halebidu Marg (8)
+  test('doubles earn another roll in the same turn, which a person rolls themselves', async () => {
+    // 2+2 lands on Income Tax, then 1+3 lands on Alwal (8)
     const engine = engineWith([2, 2, 1, 3]);
     autoDecline(engine);
+    await engine.playTurn('p1');
+    expect(engine.state.positions.p1).toBe(4);
+    expect(engine.state.activeIndex).toBe(0);
+    expect(engine.state.turnPhase).toBe('pre-roll');
+    expect(engine.state.doubles.p1).toBe(1);
     await engine.playTurn('p1');
     expect(engine.state.positions.p1).toBe(8);
     expect(engine.state.balances.p1).toBe(1500000 - 200000);
@@ -177,9 +182,11 @@ describe('rules audit', () => {
     engine.destroy();
   });
 
-  test('three doubles in one turn send the player to Kaidi Kottai', async () => {
+  test('three doubles in one turn send the player to Jail', async () => {
     const engine = engineWith([1, 1, 2, 2, 3, 3]);
     autoDecline(engine);
+    await engine.playTurn('p1');
+    await engine.playTurn('p1');
     await engine.playTurn('p1');
     expect(engine.state.positions.p1).toBe(10);
     expect(engine.state.detained.p1).toBe(0);
@@ -225,7 +232,7 @@ describe('rules audit', () => {
     engine.destroy();
   });
 
-  test('landing on Go to Kaidi Kottai detains the player', async () => {
+  test('landing on Go to Jail detains the player', async () => {
     const engine = engineWith([4, 6]);
     autoDecline(engine);
     engine.state.positions = { p1: 20, p2: 0 };
@@ -238,10 +245,10 @@ describe('rules audit', () => {
   test('both tax spaces charge the player', async () => {
     const engine = engineWith([1, 3, 2, 1]);
     autoDecline(engine);
-    await engine.playTurn('p1'); // lands on 4, Kandayam
+    await engine.playTurn('p1'); // lands on 4, Income Tax
     expect(engine.state.balances.p1).toBe(1500000 - 200000);
     engine.state.positions.p2 = 35;
-    await engine.playTurn('p2'); // lands on 38, Vajra Tax
+    await engine.playTurn('p2'); // lands on 38, Luxury Tax
     expect(engine.state.balances.p2).toBe(1500000 - 100000);
     engine.destroy();
   });
@@ -361,5 +368,154 @@ describe('ending the game by agreement', () => {
     engine.replaceWithBot('p2');
     expect(engine.state.gameOver.reason).toBe('agreed');
     engine.destroy();
+  });
+});
+
+describe('turn rhythm', () => {
+  const wait = (ms) => new Promise((resolve) => setTimeout(resolve, ms));
+  const humans = (dice, timing = {}) => {
+    const queue = [...dice];
+    return new GameEngine({
+      players: seats(['human', 'human']),
+      timing: { ...FAST, ...timing },
+      rollDie: () => queue.shift() ?? 1,
+      pickIndex: () => 0,
+    });
+  };
+
+  test('tax only leaves the balance once its pop up closes', async () => {
+    const engine = humans([1, 3], { notice: 80 }); // lands on Income Tax
+    const turn = engine.playTurn('p1');
+    await wait(40);
+    expect(engine.state.notice).toMatchObject({ kind: 'tax', amount: -200000 });
+    expect(engine.state.balances.p1).toBe(1500000);
+    await turn;
+    expect(engine.state.notice).toBe(null);
+    expect(engine.state.balances.p1).toBe(1300000);
+    engine.destroy();
+  });
+
+  test('the active player can close a pop up early', async () => {
+    const engine = humans([1, 3], { notice: 5000 });
+    const turn = engine.playTurn('p1');
+    await wait(20);
+    expect(engine.dismiss('p2')).toBe(false);
+    expect(engine.dismiss('p1')).toBe(true);
+    await turn;
+    expect(engine.state.balances.p1).toBe(1300000);
+    engine.destroy();
+  });
+
+  test('rent moves to the owner only after the rent pop up', async () => {
+    const engine = humans([2, 4], { notice: 60 }); // 6 lands on Uppal
+    engine.state.deeds = { 6: { owner: 'p2', houses: 0, hotel: false, mortgaged: false } };
+    const turn = engine.playTurn('p1');
+    await wait(30);
+    expect(engine.state.notice).toMatchObject({ kind: 'rent', ownerId: 'p2' });
+    expect(engine.state.balances.p2).toBe(1500000);
+    await turn;
+    expect(engine.state.balances.p2).toBe(1506000);
+    expect(engine.state.balances.p1).toBe(1494000);
+    engine.destroy();
+  });
+
+  test('after the move a person has a building window that times out or ends early', async () => {
+    const engine = humans([1, 2, 1, 2], { actionWindow: 60 });
+    engine.state.deeds = {
+      1: { owner: 'p1', houses: 0, hotel: false, mortgaged: false },
+      3: { owner: 'p1', houses: 0, hotel: false, mortgaged: false },
+    };
+    const first = engine.playTurn('p1'); // 3 lands on Abids, already owned
+    await wait(20);
+    expect(engine.state.turnPhase).toBe('actions');
+    expect(engine.state.actionEndsAt).toBeGreaterThan(Date.now());
+    expect(engine.manageProperty('p1', 1, 'build')).toBe(true);
+    await first;
+    expect(engine.state.activeIndex).toBe(1);
+    expect(engine.state.deeds[1].houses).toBe(1);
+
+    // Building is closed while it is not your turn
+    expect(engine.manageProperty('p1', 3, 'build')).toBe(false);
+
+    const second = engine.playTurn('p2');
+    await wait(20);
+    expect(engine.endTurnEarly('p1')).toBe(false);
+    expect(engine.endTurnEarly('p2')).toBe(true);
+    await second;
+    expect(engine.state.activeIndex).toBe(0);
+    engine.destroy();
+  });
+
+  test('building waits until the dice have stopped moving', async () => {
+    const engine = humans([1, 2], { step: 30 });
+    engine.state.deeds = {
+      1: { owner: 'p1', houses: 0, hotel: false, mortgaged: false },
+      3: { owner: 'p2', houses: 0, hotel: false, mortgaged: false },
+    };
+    const turn = engine.playTurn('p1');
+    await wait(15);
+    expect(engine.state.turnPhase).toBe('moving');
+    expect(engine.manageProperty('p1', 1, 'mortgage')).toBe(true); // raising cash is always open
+    expect(engine.manageProperty('p1', 1, 'unmortgage')).toBe(false);
+    await turn;
+    engine.destroy();
+  });
+
+  test('every move lands in the activity log', async () => {
+    const engine = humans([1, 3]);
+    await engine.playTurn('p1');
+    const texts = engine.state.log.map((entry) => entry.text);
+    expect(texts).toContain('Seat 1 rolled 1 + 3 = 4');
+    expect(texts.some((text) => text.includes('Income Tax'))).toBe(true);
+    expect(texts.some((text) => text.includes('rolls the dice'))).toBe(false);
+    engine.destroy();
+  });
+
+  test('a person who is away is played by the computer and takes the seat back on return', async () => {
+    const players = seats(['human', 'human']);
+    players[1].clientId = 'guest';
+    players[1].code = 'ABC234';
+    const engine = new GameEngine({ players, timing: FAST, rollDie: () => 1, pickIndex: () => 0 });
+    engine.start();
+    await engine.playTurn('p1'); // 1 + 1, doubles: p1 waits to roll again
+    engine.state.doubles = { p1: 0, p2: 0 };
+    engine.endTurn();
+    expect(engine.state.activeIndex).toBe(1);
+
+    engine.setAway('p2', true);
+    expect(engine.state.players[1]).toMatchObject({ away: true, clientId: null, kind: 'human' });
+    engine.schedule();
+    await wait(40);
+    expect(engine.state.positions.p2).not.toBe(0); // the computer rolled for them
+
+    engine.setAway('p2', false, 'guest-again');
+    expect(engine.state.players[1]).toMatchObject({ away: false, clientId: 'guest-again', code: 'ABC234' });
+    engine.destroy();
+  });
+
+  test('a saved game resumes before the roll of the interrupted turn', () => {
+    const engine = humans([]);
+    engine.state = {
+      ...engine.state,
+      balances: { p1: 900000, p2: 1700000 },
+      deeds: { 39: { owner: 'p2', houses: 0, hotel: false, mortgaged: false } },
+      activeIndex: 1,
+      turnCount: 17,
+      busy: true,
+      turnPhase: 'actions',
+      notice: { kind: 'rent' },
+    };
+    const restored = new GameEngine({ players: seats(['human', 'human']), timing: FAST, initialState: engine.state });
+    expect(restored.state).toMatchObject({
+      balances: { p1: 900000, p2: 1700000 },
+      activeIndex: 1,
+      turnCount: 17,
+      busy: false,
+      turnPhase: 'pre-roll',
+      notice: null,
+    });
+    expect(restored.state.deeds[39].owner).toBe('p2');
+    engine.destroy();
+    restored.destroy();
   });
 });

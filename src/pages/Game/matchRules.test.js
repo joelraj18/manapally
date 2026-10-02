@@ -83,12 +83,12 @@ describe('match length', () => {
   });
 });
 
-describe('Rajyabhishekam reward', () => {
+describe('Go reward', () => {
   test('awards ₹2,00,000 once per crossing and never advances the clock', () => {
     const clock = createMatchClock();
     let balance = 1500000;
 
-    // A turn that crosses Rajyabhishekam: reward is paid, one turn is counted.
+    // A turn that crosses Go: reward is paid, one turn is counted.
     balance = awardStartReward(balance, true);
     clock.commitTurn();
 

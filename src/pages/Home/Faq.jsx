@@ -19,6 +19,14 @@ const questions = [
     a: `A match is ${TOTAL_MATCH_TURNS} completed turns shared by the whole table, AI turns resolve in a couple of seconds so most of the time is yours to plan`,
   },
   {
+    q: 'How much time do I get on my turn?',
+    a: 'As long as you like before you roll, then 10 seconds after your move to build houses and hotels before the turn passes on, or press End turn to finish sooner',
+  },
+  {
+    q: 'What if I lose my connection or close the tab?',
+    a: 'Your seat is kept, the computer plays it for you until you return, open Manapally, choose Rejoin in the lobby and enter the room code with the Player ID shown under the dice',
+  },
+  {
     q: 'How is the winner decided?',
     a: `The highest total net worth wins, cash plus the value of every property held, when all ${TOTAL_MATCH_TURNS} turns are played, when every other player is bankrupt, or when everyone at the table agrees to end the game`,
   },

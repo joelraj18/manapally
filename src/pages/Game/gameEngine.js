@@ -22,23 +22,27 @@ import { START_REWARD, TOTAL_MATCH_TURNS } from './matchRules';
 
 export const DEFAULT_TIMING = {
   roll: 620, // dice tumble before the result shows
-  step: 120, // per space while a token walks
-  afterRoll: 400, // pause between showing the dice and moving
-  card: 3000, // a drawn card stays face up this long
-  turnGap: 500, // breath between turns
+  step: 280, // per space while a token walks
+  afterRoll: 500, // pause between showing the dice and moving
+  card: 7000, // a drawn card stays face up this long
+  notice: 5000, // a rent, tax or Go pop up stays up this long before the money moves
+  actionWindow: 10000, // after the move, time left to build before the turn ends
+  turnGap: 600, // breath between turns
   botDelay: 900, // before a computer opponent rolls
   auction: 12000, // auction length
   auctionExtend: 4000, // a late bid keeps the auction open at least this long
   botBidGap: 900, // average pause between computer bids
-  remoteDecision: 40000, // an absent remote player declines after this
-  remoteRoll: 45000, // an absent remote player is rolled for after this
+  remoteDecision: 40000, // a remote player who does not answer a purchase declines after this
   advisor: 15000, // premium AI must answer within this
 };
+
+// How many recent moves the activity log keeps.
+const LOG_LIMIT = 40;
 
 export const AUCTION_MIN_BID = 10000;
 export const DETENTION_FINE = 50000;
 export const DETENTION_MAX_ATTEMPTS = 3;
-// Kandayam (Land Tax) and Vajra (Diamond) Tax, on the same thousand rupee
+// Income Tax and Luxury Tax, on the same thousand rupee
 // scale as every other amount on the board.
 export const TAXES = { 4: 200000, 38: 100000 };
 const BUILD_RESERVE = 200000;
@@ -84,20 +88,27 @@ export const createInitialState = (players) => {
       pieceKey: player.pieceKey,
       kind: player.kind, // 'human' | 'bot' | 'ai'
       clientId: player.clientId || null, // set for remote humans
+      code: player.code || null, // the Player ID used to rejoin
+      away: false, // a disconnected person, played by the computer until they rejoin
     })),
     positions: each(() => START_SPACE),
     balances: each(() => STARTING_BALANCE),
     pardons: each(() => 0),
     doubles: each(() => 0),
-    detained: each(() => null), // turns already served in Kaidi Kottai, or null when free
+    detained: each(() => null), // turns already served in Jail, or null when free
     bankrupt: each(() => false),
     deeds: {},
     turnCount: 0,
     activeIndex: 0,
+    turnPhase: 'pre-roll', // 'pre-roll' | 'moving' | 'actions'
+    actionEndsAt: null, // when the post roll building window closes
+    notice: null, // a rent, tax or Go pop up waiting to settle
+    log: [],
     dice: null,
     rolling: false,
     busy: false,
-    activity: `${players[0].name} begins at Rajyabhishekam\nRoll the royal dice to begin`,
+    activity: `${players[0].name} begins at Go\nRoll the dice to begin`,
+    logCounter: 0,
     drawnCard: null,
     purchaseOffer: null,
     auction: null,
@@ -140,6 +151,7 @@ export default class GameEngine {
     random = Math.random,
     onChange = () => {},
     onChat = () => {},
+    initialState = null,
   }) {
     this.timing = { ...DEFAULT_TIMING, ...timing };
     this.advisor = advisor;
@@ -148,9 +160,11 @@ export default class GameEngine {
     this.random = random;
     this.onChange = onChange;
     this.onChat = onChat;
-    this.state = createInitialState(players);
+    this.state = initialState ? GameEngine.resumable(initialState) : createInitialState(players);
     this.timers = new Set();
     this.pendingPurchase = null;
+    this.pendingAction = null; // the post roll building window
+    this.pendingHold = null; // a card or notice the active player may close early
     this.destroyed = false;
     this.sfxCounter = 0;
     this.advisorFailed = false;
@@ -163,6 +177,27 @@ export default class GameEngine {
     this.schedule();
   }
 
+  // A saved snapshot taken between rolls, made safe to continue from: any
+  // pop up, auction or half finished move is dropped and the active player
+  // is back before their roll.
+  static resumable(saved) {
+    return {
+      ...createInitialState(saved.players),
+      ...saved,
+      busy: false,
+      rolling: false,
+      turnPhase: 'pre-roll',
+      actionEndsAt: null,
+      notice: null,
+      drawnCard: null,
+      purchaseOffer: null,
+      auction: null,
+      sfx: null,
+      log: Array.isArray(saved.log) ? saved.log : [],
+      logCounter: saved.logCounter || 0,
+    };
+  }
+
   destroy() {
     this.destroyed = true;
     this.timers.forEach((timer) => clearTimeout(timer));
@@ -172,6 +207,9 @@ export default class GameEngine {
       this.pendingPurchase.resolve(false);
       this.pendingPurchase = null;
     }
+
+    this.pendingAction?.finish();
+    this.pendingHold?.cancel();
   }
 
   emit() {
@@ -222,6 +260,68 @@ export default class GameEngine {
 
   isAlive(id) {
     return !this.state.bankrupt[id];
+  }
+
+  // Computer and AI opponents, and people who are away, play automatically.
+  isAuto(id) {
+    const player = this.player(id);
+    return Boolean(player && (player.kind === 'bot' || player.kind === 'ai' || player.away));
+  }
+
+  // Adds a line to the shared activity log, newest last.
+  record(text, playerId = null) {
+    const logCounter = (this.state.logCounter || 0) + 1;
+    const log = [...(this.state.log || []), { id: logCounter, text, playerId }].slice(-LOG_LIMIT);
+    return { log, logCounter };
+  }
+
+  // Shows a card or a pop up for `ms`. The player whose turn it is may close
+  // it sooner with `dismiss`.
+  hold(ms) {
+    return new Promise((resolve, reject) => {
+      if (this.destroyed) {
+        reject(CANCELLED);
+        return;
+      }
+
+      let timer = null;
+      const done = () => {
+        this.clearLater(timer);
+        this.pendingHold = null;
+        resolve();
+      };
+
+      this.pendingHold = { done, cancel: () => reject(CANCELLED) };
+      timer = this.later(done, ms);
+    });
+  }
+
+  dismiss(playerId) {
+    if (this.pendingHold && this.activePlayer.id === playerId) {
+      this.pendingHold.done();
+      return true;
+    }
+
+    return false;
+  }
+
+  // A money pop up: shown first, and only once it closes does `apply` move
+  // the money, so everyone sees what is about to happen.
+  async settle(notice, apply) {
+    this.noticeCounter = (this.noticeCounter || 0) + 1;
+    this.set({
+      notice: { ...notice, id: this.noticeCounter, endsAt: Date.now() + this.timing.notice, length: this.timing.notice },
+    });
+
+    try {
+      await this.hold(this.timing.notice);
+    } finally {
+      if (!this.destroyed) {
+        this.set({ notice: null });
+      }
+    }
+
+    return apply();
   }
 
   alivePlayers() {
@@ -281,27 +381,29 @@ export default class GameEngine {
       return;
     }
 
+    // People take as long as they like before rolling; only computer seats,
+    // and the seats of people who are away, roll by themselves.
     const active = this.activePlayer;
 
-    if (active.kind === 'bot' || active.kind === 'ai') {
+    if (this.isAuto(active.id)) {
       this.turnTimer = this.later(
         () => this.playTurn(active.id, { release: this.botRelease(active.id) }),
         this.timing.botDelay,
       );
-    } else if (active.clientId) {
-      this.turnTimer = this.later(() => {
-        this.chat(`${active.name} was away, the table rolled for them`);
-        this.playTurn(active.id);
-      }, this.timing.remoteRoll);
     }
   }
 
   // ---------------------------------------------------------------- turns
 
-  // Plays one complete turn. Returns false when it is not that player's turn.
-  // A player held in Kaidi Kottai may pass `release: 'pay'` to pay the fine or
-  // `release: 'pardon'` to spend a pardon before rolling; otherwise they roll
-  // for doubles.
+  // Plays one roll of a turn. Returns false when it is not that player's
+  // turn to roll. A player held in Jail may pass `release: 'pay'` to pay the
+  // fine or `release: 'pardon'` to spend a pardon before rolling; otherwise
+  // they roll for doubles.
+  //
+  // People roll each time themselves: after doubles the turn goes back to
+  // 'pre-roll' and waits, with no time limit, for the next roll. After the
+  // last roll a 10 second window lets them build before the turn ends.
+  // Computer seats roll again and finish their turn automatically.
   async playTurn(playerId, { release } = {}) {
     const { state } = this;
 
@@ -309,6 +411,7 @@ export default class GameEngine {
       this.destroyed ||
       state.gameOver ||
       state.busy ||
+      state.turnPhase !== 'pre-roll' ||
       this.activePlayer.id !== playerId ||
       !this.isAlive(playerId)
     ) {
@@ -317,13 +420,13 @@ export default class GameEngine {
 
     this.clearLater(this.turnTimer);
     this.turnTimer = null;
-    this.set({ busy: true });
+    this.set({ busy: true, turnPhase: 'moving' });
 
     const name = this.nameOf(playerId);
     const lines = [];
-    const say = (text) => {
+    const say = (text, { transient = false } = {}) => {
       lines.push(text);
-      this.set({ activity: lines.join('\n') });
+      this.set({ activity: lines.join('\n'), ...(transient ? {} : this.record(text, playerId)) });
     };
 
     try {
@@ -332,10 +435,10 @@ export default class GameEngine {
       if (detained && release === 'pardon' && this.state.pardons[playerId] > 0) {
         this.set({ pardons: { ...this.state.pardons, [playerId]: this.state.pardons[playerId] - 1 } });
         this.release(playerId);
-        say(`${name} used a Get Out of Kaidi Kottai Free pardon`);
+        say(`${name} used a Get Out of Jail Free pardon`);
         detained = false;
       } else if (detained && release === 'pay') {
-        this.charge(playerId, DETENTION_FINE, null, say);
+        await this.payFine(playerId, say);
 
         if (!this.isAlive(playerId)) {
           this.endTurn();
@@ -343,16 +446,16 @@ export default class GameEngine {
         }
 
         this.release(playerId);
-        say(`${name} paid the ${formatRupees(DETENTION_FINE)} fine and leaves Kaidi Kottai`);
+        say(`${name} paid the ${formatRupees(DETENTION_FINE)} fine and leaves Jail`);
         detained = false;
       }
 
-      // Doubles earn another roll; a third double in one turn means detention.
-      let doubles = 0;
+      // Doubles earn another roll; a third double in one turn means Jail.
+      let doubles = this.state.doubles[playerId] || 0;
 
       for (;;) {
         this.set({ rolling: true, dice: null });
-        say(`${name} rolls the royal dice`);
+        say(`${name} rolls the dice`, { transient: true });
         await this.sleep(this.timing.roll);
 
         const d1 = this.rollDie();
@@ -370,7 +473,7 @@ export default class GameEngine {
             this.release(playerId);
           } else if (attempt >= DETENTION_MAX_ATTEMPTS) {
             say(`${name} rolled ${d1} + ${d2}, a third miss, and must pay the fine`);
-            this.charge(playerId, DETENTION_FINE, null, say);
+            await this.payFine(playerId, say);
 
             if (!this.isAlive(playerId)) {
               break;
@@ -378,16 +481,16 @@ export default class GameEngine {
 
             this.release(playerId);
           } else {
-            say(`${name} rolled ${d1} + ${d2} and stays in Kaidi Kottai, attempt ${attempt} of ${DETENTION_MAX_ATTEMPTS}`);
+            say(`${name} rolled ${d1} + ${d2} and stays in Jail, attempt ${attempt} of ${DETENTION_MAX_ATTEMPTS}`);
             this.set({ detained: { ...this.state.detained, [playerId]: attempt } });
             await this.sleep(this.timing.turnGap);
             break;
           }
 
-          // Leaving detention moves the token, but never earns a second roll.
+          // Leaving Jail moves the token, but never earns a second roll.
           await this.sleep(this.timing.afterRoll);
           const passed = await this.walk(playerId, total);
-          this.awardStart(playerId, passed, say);
+          await this.awardStart(playerId, passed, say);
           await this.resolveLanding(playerId, total, say, { depth: 0 });
           break;
         }
@@ -406,7 +509,7 @@ export default class GameEngine {
         await this.sleep(this.timing.afterRoll);
 
         const passedStart = await this.walk(playerId, total);
-        this.awardStart(playerId, passedStart, say);
+        await this.awardStart(playerId, passedStart, say);
         await this.resolveLanding(playerId, total, say, { depth: 0 });
 
         if (
@@ -419,18 +522,26 @@ export default class GameEngine {
           break;
         }
 
+        // A person rolls again themselves, in their own time.
+        if (!this.isAuto(playerId)) {
+          say(`Doubles, ${name} rolls again`);
+          return true;
+        }
+
         say(`Doubles, ${name} rolls again`);
         await this.sleep(this.timing.turnGap);
       }
 
-      // Computer and AI opponents develop their estate between rolls.
-      const player = this.player(playerId);
-
-      if ((player.kind === 'bot' || player.kind === 'ai') && this.isAlive(playerId)) {
-        this.botDevelop(playerId, say);
+      if (this.isAlive(playerId) && !this.state.gameOver) {
+        if (this.isAuto(playerId)) {
+          // Computer and AI opponents develop their estate before passing on.
+          this.botDevelop(playerId, say);
+          await this.sleep(this.timing.turnGap);
+        } else if (!this.state.endVote?.passed) {
+          await this.actionWindow(playerId);
+        }
       }
 
-      await this.sleep(this.timing.turnGap);
       this.set({ doubles: { ...this.state.doubles, [playerId]: 0 } });
       this.endTurn();
       return true;
@@ -442,10 +553,60 @@ export default class GameEngine {
       return false;
     } finally {
       if (!this.destroyed) {
-        this.set({ busy: false, rolling: false });
+        this.set({ busy: false, rolling: false, turnPhase: 'pre-roll', actionEndsAt: null });
+
+        // Waiting to roll again keeps the doubles count; a seat that went
+        // away meanwhile is picked up by the computer here.
         this.schedule();
       }
     }
+  }
+
+  // The 10 seconds after a person's last roll, for building, selling or
+  // mortgaging before the turn passes on. `endTurnEarly` closes it sooner.
+  actionWindow(playerId) {
+    if (this.timing.actionWindow <= 0) {
+      return Promise.resolve();
+    }
+
+    return new Promise((resolve) => {
+      let timer = null;
+      const finish = () => {
+        this.clearLater(timer);
+        this.pendingAction = null;
+        resolve();
+      };
+
+      this.pendingAction = { playerId, finish };
+      this.set({
+        turnPhase: 'actions',
+        actionEndsAt: Date.now() + this.timing.actionWindow,
+        actionLength: this.timing.actionWindow,
+      });
+      timer = this.later(finish, this.timing.actionWindow);
+    });
+  }
+
+  endTurnEarly(playerId) {
+    if (this.pendingAction && this.pendingAction.playerId === playerId) {
+      this.pendingAction.finish();
+      return true;
+    }
+
+    return false;
+  }
+
+  async payFine(playerId, say) {
+    await this.settle(
+      {
+        kind: 'fine',
+        playerId,
+        title: 'Jail fine',
+        text: `${this.nameOf(playerId)} pays the fine to leave Jail`,
+        amount: -DETENTION_FINE,
+      },
+      () => this.charge(playerId, DETENTION_FINE, null, say),
+    );
   }
 
   isDetained(playerId) {
@@ -457,14 +618,14 @@ export default class GameEngine {
     this.set({ detained: { ...this.state.detained, [playerId]: null } });
   }
 
-  // Straight to Kaidi Kottai: no walking, no Rajyabhishekam reward, and the
+  // Straight to Jail: no walking, no Go reward, and the
   // turn ends even after doubles.
   sendToDetention(playerId, say) {
     this.set({
       positions: { ...this.state.positions, [playerId]: DETENTION_SPACE },
       detained: { ...this.state.detained, [playerId]: 0 },
     });
-    say(`${this.nameOf(playerId)} is sent to Kaidi Kottai (Detention)`);
+    say(`${this.nameOf(playerId)} is sent to Jail`);
   }
 
   // How a computer leaves detention: a pardon if held, the fine if cash is
@@ -634,14 +795,19 @@ export default class GameEngine {
     );
   }
 
-  awardStart(playerId, passed, say) {
+  async awardStart(playerId, passed, say) {
     if (!passed) {
       return;
     }
 
-    this.adjust(playerId, START_REWARD);
+    const name = this.nameOf(playerId);
+
+    await this.settle(
+      { kind: 'go', playerId, title: 'Passed Go', text: `${name} collects the Go reward`, amount: START_REWARD },
+      () => this.adjust(playerId, START_REWARD),
+    );
     this.sound('coronation');
-    say(`${this.nameOf(playerId)} collected ${formatRupees(START_REWARD)} at Rajyabhishekam`);
+    say(`${name} collected ${formatRupees(START_REWARD)} for passing Go`);
   }
 
   // --------------------------------------------------------------- landing
@@ -652,7 +818,7 @@ export default class GameEngine {
 
     switch (space.type) {
       case 'route':
-        this.sound(space.name.includes('Farakka') ? 'farakkaExpress' : 'pallavanExpress');
+        this.sound(space.line === 'farakka' ? 'farakkaExpress' : 'pallavanExpress');
         await this.resolveOwnable(playerId, space, diceTotal, say, options);
         break;
 
@@ -680,8 +846,11 @@ export default class GameEngine {
         const amount = TAXES[space.id] || 0;
 
         if (amount > 0) {
-          const paid = this.charge(playerId, amount, null, say);
-          say(`${name} paid ${formatRupees(paid)} ${space.name} ${space.subname || ''}`.trim());
+          const paid = await this.settle(
+            { kind: 'tax', playerId, title: space.name, text: `${name} pays ${space.name} to the bank`, amount: -amount },
+            () => this.charge(playerId, amount, null, say),
+          );
+          say(`${name} paid ${formatRupees(paid)} ${space.name}`);
         }
         break;
       }
@@ -721,8 +890,20 @@ export default class GameEngine {
       }
 
       if (rent > 0) {
-        const paid = this.charge(playerId, rent, deed.owner, say);
-        say(`${name} paid ${formatRupees(paid)} rent to ${this.nameOf(deed.owner)}`);
+        const owner = this.nameOf(deed.owner);
+        const paid = await this.settle(
+          {
+            kind: 'rent',
+            playerId,
+            ownerId: deed.owner,
+            spaceId: space.id,
+            title: `Rent at ${space.name}`,
+            text: `${name} pays rent to ${owner}`,
+            amount: -rent,
+          },
+          () => this.charge(playerId, rent, deed.owner, say),
+        );
+        say(`${name} paid ${formatRupees(paid)} rent to ${owner}`);
       }
 
       return;
@@ -751,7 +932,7 @@ export default class GameEngine {
   decidePurchase(playerId, space) {
     const player = this.player(playerId);
 
-    if (player.kind === 'bot') {
+    if (player.kind === 'bot' || player.away) {
       return Promise.resolve(this.botWantsToBuy(playerId, space));
     }
 
@@ -772,7 +953,7 @@ export default class GameEngine {
         resolve(accept);
       };
 
-      this.pendingPurchase = { playerId, resolve: finish };
+      this.pendingPurchase = { playerId, spaceId: space.id, resolve: finish };
       this.set({ purchaseOffer: { playerId, spaceId: space.id } });
 
       if (player.clientId) {
@@ -893,6 +1074,19 @@ export default class GameEngine {
     while (this.state.auction && Date.now() < this.state.auction.endsAt) {
       await this.sleep(Math.min(200, Math.max(10, this.state.auction.endsAt - Date.now())));
 
+      // People who are away bid like the computer until they come back.
+      bidders.forEach((player) => {
+        const current = this.player(player.id);
+
+        if (current.kind === 'human') {
+          if (current.away && !(player.id in limits)) {
+            limits[player.id] = this.botMaxBid(player.id, space);
+          } else if (!current.away) {
+            delete limits[player.id];
+          }
+        }
+      });
+
       if (Date.now() >= nextBotBid) {
         this.botAuctionMove(limits);
         nextBotBid = Date.now() + this.timing.botBidGap * (0.6 + this.random() * 0.8);
@@ -978,9 +1172,26 @@ export default class GameEngine {
     const card = deck[this.pickIndex(deck.length)];
     const name = this.nameOf(playerId);
 
-    this.set({ drawnCard: { deckName, text: card.text, playerId, playerName: name } });
-    await this.sleep(this.timing.card);
-    this.set({ drawnCard: null });
+    this.set({
+      drawnCard: {
+        deckName,
+        text: card.text,
+        playerId,
+        playerName: name,
+        endsAt: Date.now() + this.timing.card,
+        length: this.timing.card,
+      },
+    });
+
+    try {
+      await this.hold(this.timing.card);
+    } finally {
+      if (!this.destroyed) {
+        this.set({ drawnCard: null });
+      }
+    }
+
+    say(`${name} drew ${deckName}, ${card.text}`);
 
     const { effect } = card;
 
@@ -1050,7 +1261,7 @@ export default class GameEngine {
 
       case 'pardon':
         this.set({ pardons: { ...this.state.pardons, [playerId]: this.state.pardons[playerId] + 1 } });
-        say(`${name} keeps a Get Out of Kaidi Kottai Free pardon`);
+        say(`${name} keeps a Get Out of Jail Free pardon`);
         break;
 
       case 'repairs': {
@@ -1192,12 +1403,33 @@ export default class GameEngine {
     this.checkEndVote();
   }
 
+  canDevelop(playerId) {
+    const { state } = this;
+
+    if (this.activePlayer.id !== playerId) {
+      return false;
+    }
+
+    if (this.isAuto(playerId)) {
+      return true; // a computer builds as its turn wraps up
+    }
+
+    return (state.turnPhase === 'pre-roll' && !state.busy) || state.turnPhase === 'actions';
+  }
+
   // Owner actions from the property sheet. Each returns true when applied.
   manageProperty(playerId, spaceId, action) {
     const { state } = this;
     const deed = state.deeds[spaceId];
 
     if (!deed || deed.owner !== playerId || state.gameOver || state.auction || !this.isAlive(playerId)) {
+      return false;
+    }
+
+    // Building and lifting mortgages are for your own turn, before you roll
+    // or in the 10 seconds after your move. Selling and mortgaging to raise
+    // cash are open at any time.
+    if ((action === 'build' || action === 'unmortgage') && !this.canDevelop(playerId)) {
       return false;
     }
 
@@ -1268,7 +1500,7 @@ export default class GameEngine {
   // Everyone still playing who is a person gets a vote; computer and AI
   // opponents always go along with the table.
   voters() {
-    return this.alivePlayers().filter((player) => player.kind === 'human');
+    return this.alivePlayers().filter((player) => player.kind === 'human' && !player.away);
   }
 
   proposeEnd(playerId) {
@@ -1326,9 +1558,53 @@ export default class GameEngine {
 
     if (this.state.busy) {
       this.chat('Everyone agreed, the game ends when this turn is over');
+      this.pendingAction?.finish();
     } else {
       this.finish('agreed');
     }
+  }
+
+  // A person dropped out (away) or came back. While away the computer plays
+  // their seat with their own cash and deeds; coming back hands it straight
+  // back, from the next decision on.
+  setAway(playerId, away, clientId = null) {
+    const player = this.player(playerId);
+
+    if (!player || player.kind !== 'human' || player.away === away) {
+      if (player && !away && clientId) {
+        this.set({
+          players: this.state.players.map((entry) => (entry.id === playerId ? { ...entry, clientId } : entry)),
+        });
+      }
+      return false;
+    }
+
+    this.set({
+      players: this.state.players.map((entry) =>
+        entry.id === playerId ? { ...entry, away, clientId: away ? null : clientId || entry.clientId } : entry,
+      ),
+    });
+
+    if (away) {
+      this.chat(`${player.name} disconnected, the computer plays their seat until they rejoin`);
+
+      if (this.pendingPurchase?.playerId === playerId) {
+        this.pendingPurchase.resolve(this.botWantsToBuy(playerId, BOARD_SPACES[this.pendingPurchase.spaceId]));
+      }
+
+      if (this.pendingAction?.playerId === playerId) {
+        this.pendingAction.finish();
+      }
+      this.checkEndVote();
+    } else {
+      this.chat(`${player.name} is back at the table`);
+    }
+
+    if (!this.state.busy && !this.state.gameOver) {
+      this.schedule();
+    }
+
+    return true;
   }
 
   // A remote player left mid match: a computer opponent takes the seat.

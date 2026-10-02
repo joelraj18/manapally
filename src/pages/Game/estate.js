@@ -1,5 +1,7 @@
 // Pure economy rules for MANAPALLY.
-// No React, no timers – easy to unit test.
+// No React, no timers, easy to unit test.
+
+import { BOARD_SPACES } from './boardData';
 
 export const ROUTE_SPACES = [5, 15, 25, 35];
 export const UTILITY_SPACES = [12, 28];
@@ -42,48 +44,8 @@ export const utilityDetails = {
   mortgage: 75000,
 };
 
-export const BOARD_SPACES = [
-  { id: 0, name: 'Rajyabhi shekam', subname: '(Coronation)', type: 'start', icon: '♛' },
-  { id: 1, name: 'Pallava Path', type: 'property', colorGroup: 'maroon', price: 60000 },
-  { id: 2, name: 'Temple Hundi', type: 'community', icon: '✦' },
-  { id: 3, name: 'Satavahana Street', type: 'property', colorGroup: 'maroon', price: 60000 },
-  { id: 4, name: 'Kandayam', subname: '(Land Tax)', type: 'tax', icon: '₹' },
-  { id: 5, name: 'Chola Express', type: 'route', price: 200000 },
-  { id: 6, name: 'Chera Road', type: 'property', colorGroup: 'peacock', price: 100000 },
-  { id: 7, name: "Raja's Order", type: 'chance', icon: '✧' },
-  { id: 8, name: 'Hoysala Halebidu Marg', type: 'property', colorGroup: 'peacock', price: 100000 },
-  { id: 9, name: 'Pandya Madurai Street', type: 'property', colorGroup: 'peacock', price: 120000 },
-  { id: 10, name: 'Kaidi Kottai', subname: 'Just Visiting', type: 'detention', icon: '♜' },
-  { id: 11, name: 'Wodeyar Mysuru Place', type: 'property', colorGroup: 'rose', price: 140000 },
-  { id: 12, name: 'Kaveri Power Company', type: 'utility', price: 150000 },
-  { id: 13, name: 'Travancore Avenue', type: 'property', colorGroup: 'rose', price: 140000 },
-  { id: 14, name: 'Nayak Madurai Mahal Road', type: 'property', colorGroup: 'rose', price: 160000 },
-  { id: 15, name: 'Pandya Express', type: 'route', price: 200000 },
-  { id: 16, name: 'Badami Fort Road', type: 'property', colorGroup: 'terracotta', price: 180000 },
-  { id: 17, name: 'Temple Hundi', type: 'community', icon: '✦' },
-  { id: 18, name: 'Golconda Fort Road', type: 'property', colorGroup: 'terracotta', price: 180000 },
-  { id: 19, name: 'Warangal Kakatiya Marg', type: 'property', colorGroup: 'terracotta', price: 200000 },
-  { id: 20, name: 'Ananda Nilayam', subname: '(Free Rest)', type: 'resting', icon: '☕' },
-  { id: 21, name: 'Hampi Bazaar Road', type: 'property', colorGroup: 'kumkum', price: 220000 },
-  { id: 22, name: "Raja's Order", type: 'chance', icon: '✧' },
-  { id: 23, name: 'Rajaraja Chola Avenue', type: 'property', colorGroup: 'kumkum', price: 220000 },
-  { id: 24, name: 'Rani Abbakka Avenue', type: 'property', colorGroup: 'kumkum', price: 240000 },
-  { id: 25, name: 'Chera Express', type: 'route', price: 200000 },
-  { id: 26, name: 'Tipu Sultan Avenue', type: 'property', colorGroup: 'turmeric', price: 260000 },
-  { id: 27, name: 'Chandragiri Avenue', type: 'property', colorGroup: 'turmeric', price: 260000 },
-  { id: 28, name: 'Tungabhadra Water Works', type: 'utility', price: 150000 },
-  { id: 29, name: 'Chalukya Badami Gardens', type: 'property', colorGroup: 'turmeric', price: 280000 },
-  { id: 30, name: 'Go to Kaidi Kottai', type: 'go-to-detention', icon: '⚠' },
-  { id: 31, name: 'Padmapuram Avenue', type: 'property', colorGroup: 'emerald', price: 300000 },
-  { id: 32, name: 'Vijayanagara Empire Avenue', type: 'property', colorGroup: 'emerald', price: 300000 },
-  { id: 33, name: 'Temple Hundi', type: 'community', icon: '✦' },
-  { id: 34, name: 'Mysore Palace Avenue', type: 'property', colorGroup: 'emerald', price: 320000 },
-  { id: 35, name: 'Vijayanagara Express', type: 'route', price: 200000 },
-  { id: 36, name: "Raja's Order", type: 'chance', icon: '✧' },
-  { id: 37, name: 'Meenakshi Amman Place', type: 'property', colorGroup: 'indigo', price: 350000 },
-  { id: 38, name: 'Vajra (Diamond) Tax', type: 'tax', icon: '₹' },
-  { id: 39, name: 'Brihadeeswara Boulevard', type: 'property', colorGroup: 'indigo', price: 400000 },
-];
+// The board lives in boardData.js; re-exported so these helpers default to it.
+export { BOARD_SPACES };
 
 /**
  * Compute rent owed when landing on `spaceId`.

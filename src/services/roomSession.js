@@ -12,6 +12,38 @@ const CODE_CHARACTERS = 'ABCDEFGHJKLMNPQRSTUVWXYZ23456789';
 const MAX_CHAT = 120;
 const MAX_TEXT = 240;
 const PROTOCOL = 1;
+const SEAT_KEY = 'manapally-seat';
+const HOST_GAME_KEY = 'manapally-host-game';
+const RECONNECT_EVERY = 3000;
+const RECONNECT_FOR = 120000;
+
+// Small, non secret notes kept on this device so a dropped player can find
+// their way back: the room code and their Player ID, and for the host a
+// snapshot of the match between rolls. Never the premium AI key.
+const readStore = (key) => {
+  try {
+    return JSON.parse(window.localStorage.getItem(key) || 'null');
+  } catch {
+    return null;
+  }
+};
+
+const writeStore = (key, value) => {
+  try {
+    if (value === null) {
+      window.localStorage.removeItem(key);
+    } else {
+      window.localStorage.setItem(key, JSON.stringify(value));
+    }
+  } catch {
+    // Private windows may block storage; rejoining then needs the ID typed in.
+  }
+};
+
+export const savedSeat = () => readStore(SEAT_KEY);
+export const savedHostGame = () => readStore(HOST_GAME_KEY);
+
+export const cleanCode = (code) => String(code || '').toUpperCase().replace(/[^A-Z0-9]/g, '').slice(0, 6);
 
 export const createRoomCode = () =>
   Array.from(
@@ -43,6 +75,10 @@ export default class RoomSession {
     this.myPlayerId = null;
     this.listeners = new Map();
     this.botCounter = { bot: 0, ai: 0 };
+    this.gameId = null;
+    this.lastGameState = null;
+    this.myCode = null;
+    this.connection = 'online'; // 'online' | 'reconnecting'
   }
 
   // --------------------------------------------------------------- events
@@ -57,6 +93,12 @@ export default class RoomSession {
   }
 
   emit(event, payload) {
+    // The latest start is kept, so a view that mounts after a rejoin or a
+    // host resume still knows which match it belongs to.
+    if (event === 'start') {
+      this.startConfig = payload;
+    }
+
     this.listeners.get(event)?.forEach((fn) => fn(payload));
   }
 
@@ -66,6 +108,17 @@ export default class RoomSession {
 
   // ------------------------------------------------------------- creation
 
+  openHost(code) {
+    this.code = code;
+    this.transport = openHostTransport(code, {
+      onPeerOpen: () => {},
+      onMessage: (peerId, message) => this.handleGuestMessage(peerId, message),
+      onPeerClose: (peerId) => this.handleGuestLeft(peerId),
+      onError: () => {},
+    });
+    return this.transport.ready;
+  }
+
   static async host({ name, pieceKey }) {
     const session = new RoomSession('host');
     session.lobby.seats = [
@@ -74,16 +127,8 @@ export default class RoomSession {
 
     // A clashing code is astronomically rare, but retry just in case.
     for (let attempt = 0; attempt < 3; attempt += 1) {
-      session.code = createRoomCode();
-
       try {
-        session.transport = openHostTransport(session.code, {
-          onPeerOpen: () => {},
-          onMessage: (peerId, message) => session.handleGuestMessage(peerId, message),
-          onPeerClose: (peerId) => session.handleGuestLeft(peerId),
-          onError: () => {},
-        });
-        await session.transport.ready;
+        await session.openHost(createRoomCode());
         session.status = 'online';
         break;
       } catch (error) {
@@ -105,38 +150,116 @@ export default class RoomSession {
     return session;
   }
 
-  static async join({ code, name, pieceKey }) {
+  // `rejoin` is a Player ID: the host then hands back that seat in a match
+  // already under way instead of adding a new one.
+  static async join({ code, name, pieceKey, rejoin = null }) {
     const session = new RoomSession('guest');
-    session.code = code.toUpperCase();
+    session.code = cleanCode(code);
+    session.myCode = rejoin ? cleanCode(rejoin) : null;
 
-    session.transport = openGuestTransport(session.code, {
-      onMessage: (_, message) => session.handleHostMessage(message),
-      onClose: () => session.handleClosed('The host closed the room'),
-    });
-
-    try {
-      await session.transport.ready;
-    } catch (error) {
-      session.transport.close();
-      throw new Error(error.message === 'not-found' || error.message === 'timeout' ? 'not-found' : 'network');
-    }
-
-    const welcome = new Promise((resolve, reject) => {
-      const timer = setTimeout(() => reject(new Error('not-found')), 8000);
-      session.pendingWelcome = { resolve, reject, timer };
-    });
-
-    session.transport.send({ t: 'hello', v: PROTOCOL, name: cleanName(name), pieceKey });
+    // A rejoin is only complete once the host has said which match it is.
+    const started = rejoin
+      ? new Promise((resolve, reject) => {
+          const off = session.on('start', () => {
+            clearTimeout(timer);
+            off();
+            resolve();
+          });
+          const timer = setTimeout(() => {
+            off();
+            reject(new Error('not-found'));
+          }, 10000);
+        })
+      : null;
+    started?.catch(() => {});
 
     try {
-      await welcome;
+      await session.connect({ name: cleanName(name), pieceKey, rejoin: session.myCode });
+      await started;
     } catch (error) {
-      session.transport.close();
+      session.transport?.close();
       throw error;
     }
 
     session.status = 'online';
     return session;
+  }
+
+  async connect(hello) {
+    const transport = openGuestTransport(this.code, {
+      onMessage: (_, message) => {
+        if (this.transport === transport) this.handleHostMessage(message);
+      },
+      onClose: () => {
+        if (this.transport === transport) this.handleHostLost();
+      },
+    });
+    this.transport = transport;
+
+    try {
+      await transport.ready;
+    } catch (error) {
+      transport.close();
+      throw new Error(error.message === 'not-found' || error.message === 'timeout' ? 'not-found' : 'network');
+    }
+
+    const welcome = new Promise((resolve, reject) => {
+      const timer = setTimeout(() => reject(new Error('not-found')), 8000);
+      this.pendingWelcome = { resolve, reject, timer };
+    });
+
+    transport.send({ t: 'hello', v: PROTOCOL, ...hello });
+
+    try {
+      await welcome;
+    } catch (error) {
+      transport.close();
+      throw error;
+    }
+  }
+
+  // The link to the host dropped. Before a match that ends the room; during
+  // one, keep trying to rejoin with this seat's Player ID for two minutes, so
+  // a host who reloads or a wobbly connection does not end the game.
+  async handleHostLost() {
+    if (this.status === 'closed') {
+      return;
+    }
+
+    if (!this.started || !this.myCode) {
+      this.handleClosed('The host closed the room');
+      return;
+    }
+
+    if (this.connection === 'reconnecting') {
+      return;
+    }
+
+    this.connection = 'reconnecting';
+    this.emit('connection', 'reconnecting');
+    const giveUpAt = Date.now() + RECONNECT_FOR;
+
+    while (this.status !== 'closed' && Date.now() < giveUpAt) {
+      await new Promise((resolve) => setTimeout(resolve, RECONNECT_EVERY));
+
+      if (this.status === 'closed') {
+        return;
+      }
+
+      try {
+        this.transport?.close();
+        await this.connect({ rejoin: this.myCode });
+        this.connection = 'online';
+        this.emit('connection', 'online');
+        return;
+      } catch (error) {
+        if (error.message === 'unknown-player') {
+          break;
+        }
+      }
+    }
+
+    this.handleClosed('Lost the connection to the host');
   }
 
   // ----------------------------------------------------------- host side
@@ -174,6 +297,11 @@ export default class RoomSession {
           this.transport.send(peerId, { t: 'reject', reason });
           setTimeout(() => this.transport?.kick(peerId), 300);
         };
+
+        if (message.rejoin) {
+          this.rejoinSeat(peerId, cleanCode(message.rejoin), reject);
+          return;
+        }
 
         if (this.started) {
           reject('started');
@@ -219,6 +347,46 @@ export default class RoomSession {
     }
   }
 
+  // A Player ID came back: hand that person their seat, then the latest
+  // snapshot so they resume exactly where the match is.
+  rejoinSeat(peerId, playerCode, reject) {
+    // A host still reopening its room is not ready yet; the guest retries.
+    if (this.started && !this.gameId) {
+      reject('not-ready');
+      return;
+    }
+
+    const player = this.started && this.players?.find((entry) => entry.code === playerCode);
+
+    if (!player || player.kind !== 'human' || player.id === this.myPlayerId) {
+      reject('unknown-player');
+      return;
+    }
+
+    const previous = player.clientId;
+
+    if (previous && previous !== peerId) {
+      this.transport?.kick(previous);
+    }
+
+    this.players = this.players.map((entry) => (entry.id === player.id ? { ...entry, clientId: peerId } : entry));
+    const seat = this.lobby.seats[this.players.findIndex((entry) => entry.id === player.id)];
+
+    if (seat) {
+      seat.clientId = peerId;
+    }
+
+    this.transport.send(peerId, { t: 'welcome', clientId: peerId, code: this.code });
+    this.transport.send(peerId, { t: 'chat-log', chat: this.chat });
+    this.transport.send(peerId, { t: 'start', players: this.players, gameId: this.gameId, rejoin: true });
+
+    if (this.lastGameState) {
+      this.transport.send(peerId, { t: 'game', state: this.lastGameState, sentAt: Date.now(), gameId: this.gameId });
+    }
+
+    this.emit('peer-rejoined', { clientId: peerId, playerId: player.id });
+  }
+
   handleGuestLeft(peerId) {
     const seat = this.lobby.seats.find((entry) => entry.clientId === peerId);
 
@@ -227,8 +395,9 @@ export default class RoomSession {
     }
 
     if (this.started) {
+      // The seat stays theirs: the computer plays it until they rejoin.
       seat.clientId = null;
-      seat.kind = 'bot';
+      this.players = this.players?.map((entry) => (entry.clientId === peerId ? { ...entry, clientId: null } : entry));
       this.emit('peer-left', peerId);
     } else {
       this.lobby.seats = this.lobby.seats.filter((entry) => entry !== seat);
@@ -292,18 +461,101 @@ export default class RoomSession {
     }
 
     this.started = true;
+    const codes = new Set();
+    const uniqueCode = () => {
+      let code;
+      do {
+        code = createRoomCode();
+      } while (codes.has(code));
+      codes.add(code);
+      return code;
+    };
+
     this.players = this.lobby.seats.map((seat, index) => ({
       id: `p${index + 1}`,
       name: seat.name,
       pieceKey: seat.pieceKey,
       kind: seat.kind,
       clientId: seat.clientId === 'host' ? null : seat.clientId,
+      code: uniqueCode(),
     }));
     this.myPlayerId = 'p1';
+    this.announceStart();
+  }
 
-    const gameId = Date.now().toString(36);
-    this.broadcast({ t: 'start', players: this.players, gameId });
-    this.emit('start', { players: this.players, myPlayerId: 'p1', gameId });
+  announceStart(resume = null) {
+    this.gameId = Date.now().toString(36);
+    this.lastGameState = resume;
+    writeStore(SEAT_KEY, { code: this.code, playerCode: this.players[0].code, name: this.players[0].name });
+    this.broadcast({ t: 'start', players: this.players, gameId: this.gameId });
+    this.emit('start', { players: this.players, myPlayerId: 'p1', gameId: this.gameId, resume });
+  }
+
+  // The host reloaded or lost their tab: reopen the same room from the
+  // snapshot saved on this device. Friends reconnect by themselves, and
+  // their seats are played by the computer until they do.
+  static async resumeHost(saved) {
+    const session = new RoomSession('host');
+    session.lobby = saved.lobby;
+    session.chat = Array.isArray(saved.chat) ? saved.chat : [];
+    session.started = true;
+    session.myPlayerId = 'p1';
+    session.players = saved.players.map((player) => ({ ...player, clientId: null }));
+    session.lobby.seats = session.lobby.seats.map((seat) =>
+      seat.clientId === 'host' ? seat : { ...seat, clientId: null },
+    );
+
+    // The old room name can take a few seconds to free up after a reload.
+    let lastError = null;
+
+    for (let attempt = 0; attempt < 6; attempt += 1) {
+      try {
+        await session.openHost(saved.code);
+        lastError = null;
+        break;
+      } catch (error) {
+        session.transport?.close();
+        session.transport = null;
+        lastError = error;
+        await new Promise((resolve) => setTimeout(resolve, 2000));
+      }
+    }
+
+    if (lastError) {
+      throw lastError;
+    }
+
+    session.status = 'online';
+    const state = {
+      ...saved.state,
+      players: saved.state.players.map((player) =>
+        player.kind === 'human' && player.id !== 'p1' ? { ...player, clientId: null, away: true } : player,
+      ),
+    };
+    session.postSystem('The host is back, the match continues');
+    session.announceStart(state);
+    return session;
+  }
+
+  // Called by the board between rolls, so a reload loses at most one roll.
+  saveHostGame(state) {
+    if (!this.isHost || !this.started) {
+      return;
+    }
+
+    if (state.gameOver) {
+      writeStore(HOST_GAME_KEY, null);
+      return;
+    }
+
+    writeStore(HOST_GAME_KEY, {
+      code: this.code,
+      players: this.players,
+      lobby: this.lobby,
+      chat: this.chat.slice(-40),
+      state,
+      savedAt: Date.now(),
+    });
   }
 
   // A rematch keeps everyone who is still connected.
@@ -316,19 +568,18 @@ export default class RoomSession {
       this.lobby.seats.filter((seat) => seat.clientId).map((seat) => seat.clientId),
     );
     this.players = this.players.map((player) =>
-      player.clientId && !connected.has(player.clientId)
+      player.kind === 'human' && player.id !== 'p1' && !(player.clientId && connected.has(player.clientId))
         ? { ...player, kind: 'bot', clientId: null }
         : player,
     );
 
-    const gameId = Date.now().toString(36);
-    this.broadcast({ t: 'start', players: this.players, gameId });
-    this.emit('start', { players: this.players, myPlayerId: 'p1', gameId });
+    this.announceStart();
   }
 
   broadcastGame(state) {
     if (this.isHost) {
-      this.broadcast({ t: 'game', state, sentAt: Date.now() });
+      this.lastGameState = state;
+      this.broadcast({ t: 'game', state, sentAt: Date.now(), gameId: this.gameId });
     }
   }
 
@@ -409,6 +660,18 @@ export default class RoomSession {
         this.players = message.players;
         const me = message.players.find((player) => player.clientId === this.myClientId);
         this.myPlayerId = me ? me.id : null;
+        this.myCode = me?.code || null;
+        this.gameId = message.gameId;
+
+        if (me?.code) {
+          writeStore(SEAT_KEY, { code: this.code, playerCode: me.code, name: me.name });
+        }
+
+        // A reconnect inside the same match keeps the board as it is.
+        if (message.rejoin && this.connection === 'reconnecting') {
+          break;
+        }
+
         this.emit('start', { players: message.players, myPlayerId: this.myPlayerId, gameId: message.gameId });
         break;
       }
@@ -468,6 +731,7 @@ export default class RoomSession {
 
     if (this.isHost) {
       this.broadcast({ t: 'closed' });
+      writeStore(HOST_GAME_KEY, null);
     }
 
     this.status = 'closed';

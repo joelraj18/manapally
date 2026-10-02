@@ -100,8 +100,8 @@ export default function Hero({ onCreateRoom, onExplore }) {
         <p className="hero-subtitle">Premium South Indian Strategy Board Game</p>
 
         <p className="hero-description">
-          Collect legendary districts from Pallava Path to Brihadeeswara Boulevard, ride
-          the express routes and outplay your circle in one beautifully paced match
+          Collect the cities of Andhra Pradesh and Telangana from Koti to Jubilee, ride
+          the express stations and outplay your circle in one beautifully paced match
         </p>
 
         <div className="hero-actions">

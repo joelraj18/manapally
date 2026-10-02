@@ -95,7 +95,7 @@ describe('premium AI', () => {
     expect(call.body.output_config.effort).toBe('low');
     expect(call.body.output_config.format.type).toBe('json_schema');
     expect(call.body.output_config.format.schema.required).toEqual(['buy', 'comment']);
-    expect(call.body.messages[0].content).toContain('Pallava Path');
+    expect(call.body.messages[0].content).toContain('Koti');
     // The key never travels inside the prompt
     expect(JSON.stringify(call.body)).not.toContain('sk-ant-test-key');
   });

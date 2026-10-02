@@ -4,8 +4,8 @@ import { TOTAL_MATCH_TURNS } from '../Game/matchRules';
 const tips = [
   {
     icon: 'train',
-    title: 'Collect the express routes',
-    text: 'Each extra route doubles the rent, and all four together earn ₹2,00,000 from every visitor',
+    title: 'Collect the express stations',
+    text: 'Each extra station doubles the rent, and all four together earn ₹2,00,000 from every visitor',
   },
   {
     icon: 'layers',

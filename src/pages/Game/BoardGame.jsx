@@ -19,6 +19,7 @@ import GameEngine, {
 } from './gameEngine';
 import { START_REWARD, TOTAL_MATCH_TURNS } from './matchRules';
 import { PIECES, PieceMark } from './pieces.jsx';
+import TileArt from './tileArt.jsx';
 import './board-game.css';
 
 import coronationSound from '../../assets/sounds/coronation.mp3';
@@ -83,23 +84,54 @@ const testTiming = () => {
 const kindLabel = (player) => {
   if (player.kind === 'bot') return 'Computer opponent';
   if (player.kind === 'ai') return 'AI opponent';
-  return player.clientId ? 'Player' : 'Host';
+  if (player.away) return 'Away, the computer is playing';
+  return player.id === 'p1' ? 'Host' : 'Player';
 };
 
-// Seconds left on the auction clock, ticking locally between snapshots.
+// Long city names on the narrow top and bottom row tiles get a smaller type
+// size so they never break in the middle of a word.
+const nameFit = (space) => {
+  const narrow = space.id % 20 !== 0 && space.id % 20 < 10;
+  const longest = Math.max(...space.name.split(' ').map((word) => word.length));
+
+  if (!narrow) return '';
+  if (longest >= 11) return 'space-name--xlong';
+  if (longest >= 9) return 'space-name--long';
+  return longest >= 7 ? 'space-name--mid' : '';
+};
+
+const spaceAccent = (space) =>
+  space.colorGroup ? `var(--color-${space.colorGroup})` : space.type === 'route' ? '#2f6170' : '#a46f17';
+
+// The fullscreen API is missing or blocked in some browsers and frames.
+const toggleFullscreen = () => {
+  try {
+    if (document.fullscreenElement) {
+      document.exitFullscreen?.();
+    } else {
+      document.documentElement.requestFullscreen?.().catch(() => {});
+    }
+  } catch {
+    // Nothing to do, the layout already fills the window.
+  }
+};
+
+// Time left on an engine clock (auction, pop up or building window),
+// ticking locally between snapshots. Read against the current time on every
+// render, so a clock that has just started never shows a stale value.
 function useCountdown(endsAt) {
-  const [now, setNow] = useState(Date.now());
+  const [, setTick] = useState(0);
 
   useEffect(() => {
     if (!endsAt) {
       return undefined;
     }
 
-    const timer = setInterval(() => setNow(Date.now()), 100);
+    const timer = setInterval(() => setTick((tick) => tick + 1), 100);
     return () => clearInterval(timer);
   }, [endsAt]);
 
-  return endsAt ? Math.max(0, endsAt - now) : 0;
+  return endsAt ? Math.max(0, endsAt - Date.now()) : 0;
 }
 
 export default function BoardGame({
@@ -110,15 +142,20 @@ export default function BoardGame({
   onAudio,
   onExit,
   onRestart,
+  resume = null,
 }) {
   const isHost = !session || session.isHost;
   const [state, setState] = useState(() => {
     const cached = !isHost && session?.lastGame;
-    return cached ? cached.state : createInitialState(seatPlayers);
+    return cached ? cached.state : resume || createInitialState(seatPlayers);
   });
+  const [connection, setConnection] = useState('online');
+  const [isFullscreen, setIsFullscreen] = useState(false);
+  const [copiedId, setCopiedId] = useState(false);
   const [clockOffset, setClockOffset] = useState(0);
   const [selectedProperty, setSelectedProperty] = useState(null);
-  const [sheet, setSheet] = useState(null); // 'dice' | 'match' | null
+  const [sheet, setSheet] = useState(null); // 'dice' | 'match' | 'end' | 'cards' | null
+  const [cardsFor, setCardsFor] = useState(null);
   const [showResults, setShowResults] = useState(true);
   const engineRef = useRef(null);
 
@@ -133,9 +170,15 @@ export default function BoardGame({
       players: seatPlayers,
       advisor: premiumAdvisor,
       timing: testTiming(),
+      initialState: resume,
       onChange: (next) => {
         setState(next);
         session?.broadcastGame(next);
+
+        // Saved between rolls, so a host who reloads can reopen the room.
+        if ((!next.busy && next.turnPhase === 'pre-roll') || next.gameOver) {
+          session?.saveHostGame(next);
+        }
       },
       onChat: ({ playerId, text }) => {
         if (!session) return;
@@ -151,6 +194,14 @@ export default function BoardGame({
 
     engineRef.current = engine;
     engine.start();
+
+    // After a host resume, friends who reconnected before this board was
+    // ready get their seats back straight away.
+    session?.players?.forEach((player) => {
+      if (player.clientId && engine.player(player.id)?.away) {
+        engine.setAway(player.id, false, player.clientId);
+      }
+    });
 
     const offIntent = session?.on('intent', ({ clientId, action }) => {
       const player = engine.state.players.find((entry) => entry.clientId === clientId);
@@ -178,25 +229,41 @@ export default function BoardGame({
         case 'end-vote':
           engine.voteEnd(player.id, Boolean(action.agree));
           break;
+        case 'end-turn':
+          engine.endTurnEarly(player.id);
+          break;
+        case 'dismiss':
+          engine.dismiss(player.id);
+          break;
         default:
           break;
       }
     });
 
+    // A dropped player keeps their seat; the computer plays it until they
+    // come back with their Player ID.
     const offLeft = session?.on('peer-left', (clientId) => {
       const player = engine.state.players.find((entry) => entry.clientId === clientId);
 
       if (player) {
-        engine.replaceWithBot(player.id);
+        engine.setAway(player.id, true);
       }
+    });
+
+    const offBack = session?.on('peer-rejoined', ({ clientId, playerId }) => {
+      engine.setAway(playerId, false, clientId);
+      session.broadcastGame(engine.state);
     });
 
     return () => {
       offIntent?.();
       offLeft?.();
+      offBack?.();
       engine.destroy();
       engineRef.current = null;
     };
+    // The saved snapshot only seeds the first engine of this board.
+    // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [isHost, seatPlayers, session]);
 
   // Guests mirror the host's snapshots.
@@ -205,11 +272,28 @@ export default function BoardGame({
       return undefined;
     }
 
-    return session.on('game', ({ state: next, sentAt }) => {
-      setState((current) => (next.version >= current.version ? next : current));
+    let epoch = session.lastGame?.gameId;
+    const offGame = session.on('game', ({ state: next, sentAt, gameId }) => {
+      // A host that reopened the room starts a new epoch from its saved
+      // snapshot, which may be older than what this board last showed.
+      const fresh = gameId !== epoch;
+      epoch = gameId;
+      setState((current) => (fresh || next.version >= current.version ? next : current));
       setClockOffset(Date.now() - sentAt);
     });
+    const offConnection = session.on('connection', setConnection);
+
+    return () => {
+      offGame();
+      offConnection();
+    };
   }, [isHost, session]);
+
+  useEffect(() => {
+    const onChange = () => setIsFullscreen(Boolean(document.fullscreenElement));
+    document.addEventListener('fullscreenchange', onChange);
+    return () => document.removeEventListener('fullscreenchange', onChange);
+  }, []);
 
   // One way to act, whether the rules run here or on the host.
   const act = useCallback(
@@ -241,6 +325,12 @@ export default function BoardGame({
           break;
         case 'end-vote':
           engine.voteEnd(myPlayerId, Boolean(action.agree));
+          break;
+        case 'end-turn':
+          engine.endTurnEarly(myPlayerId);
+          break;
+        case 'dismiss':
+          engine.dismiss(myPlayerId);
           break;
         default:
           break;
@@ -331,7 +421,9 @@ export default function BoardGame({
   const me = players.find((player) => player.id === myPlayerId);
   const amAlive = me && !state.bankrupt[me.id];
   const isMyTurn = activePlayer?.id === myPlayerId;
-  const canRoll = isMyTurn && amAlive && !state.busy && !state.gameOver;
+  const canRoll = isMyTurn && amAlive && !state.busy && !state.gameOver && state.turnPhase !== 'actions';
+  const inActionWindow = isMyTurn && state.turnPhase === 'actions' && !state.gameOver;
+  const rollAgain = isMyTurn && (state.doubles?.[myPlayerId] || 0) > 0 && !state.busy;
   // Ending by agreement: every person still playing votes, computers follow.
   const voters = players.filter((player) => player.kind === 'human' && !state.bankrupt[player.id]);
   const endVote = state.endVote;
@@ -374,8 +466,14 @@ export default function BoardGame({
     [players, state.balances, state.deeds, state.bankrupt],
   );
 
-  const auctionEndsAt = state.auction ? state.auction.endsAt + (isHost ? 0 : clockOffset) : 0;
-  const auctionLeft = useCountdown(auctionEndsAt);
+  const localTime = (at) => (at ? at + (isHost ? 0 : clockOffset) : 0);
+  const auctionLeft = useCountdown(localTime(state.auction?.endsAt));
+  const actionLeft = useCountdown(localTime(state.turnPhase === 'actions' ? state.actionEndsAt : 0));
+  const noticeLeft = useCountdown(localTime(state.notice?.endsAt || state.drawnCard?.endsAt));
+  const log = state.log || [];
+  const myCode = me?.code;
+  const canDevelopNow =
+    isMyTurn && amAlive && !state.gameOver && ((state.turnPhase === 'pre-roll' && !state.busy) || state.turnPhase === 'actions');
 
   useEffect(() => {
     if (state.gameOver) {
@@ -400,7 +498,7 @@ export default function BoardGame({
     const space = BOARD_SPACES[offer.spaceId];
     const balance = state.balances[myPlayerId];
     const canAfford = balance >= space.price;
-    const accent = space.colorGroup ? `var(--color-${space.colorGroup})` : space.type === 'route' ? '#2f6170' : '#a46f17';
+    const accent = spaceAccent(space);
 
     return (
       <div className="drawn-card-overlay">
@@ -461,7 +559,7 @@ export default function BoardGame({
       { label: '+ ₹50K', amount: Math.max(minimum, auction.highBid + 50000) },
       { label: '+ ₹1L', amount: Math.max(minimum, auction.highBid + 100000) },
     ];
-    const accent = space.colorGroup ? `var(--color-${space.colorGroup})` : space.type === 'route' ? '#2f6170' : '#a46f17';
+    const accent = spaceAccent(space);
 
     return (
       <div className="drawn-card-overlay auction-overlay">
@@ -545,7 +643,7 @@ export default function BoardGame({
     const deed = state.deeds[selectedProperty];
     const owner = ownerOf(selectedProperty);
     const accent = isRoute ? '#2f6170' : isUtility ? '#a46f17' : `var(--color-${space.colorGroup})`;
-    const kicker = isRoute ? 'Express route' : isUtility ? 'Utility' : 'District';
+    const kicker = isRoute ? 'Express station' : isUtility ? 'Utility' : 'District';
     const mine = deed && deed.owner === myPlayerId && amAlive && !state.gameOver;
     const balance = state.balances[myPlayerId] ?? 0;
 
@@ -586,10 +684,10 @@ export default function BoardGame({
             {isRoute && (
               <>
                 <div className="property-card-section">
-                  <h4>Rent by routes owned</h4>
+                  <h4>Rent by stations owned</h4>
                   {routeDetails.rent.map((rent, index) => (
                     <div className="property-card-row" key={rent}>
-                      <span>{index + 1} route{index ? 's' : ''} owned</span>
+                      <span>{index + 1} station{index ? 's' : ''} owned</span>
                       <span>{formatRupees(rent)}</span>
                     </div>
                   ))}
@@ -601,8 +699,8 @@ export default function BoardGame({
                   </div>
                 </div>
                 <p className="property-card-note">
-                  All four express route spaces, two on the Pallavan Superfast Express and two on The
-                  Farakka Express, share this schedule and rent rises with how many routes one owner holds
+                  Secunderabad, Vijayawada, Kacheguda and Tirupati share this schedule, and rent rises with
+                  how many stations one owner holds
                 </p>
               </>
             )}
@@ -660,6 +758,13 @@ export default function BoardGame({
             )}
           </div>
 
+          {mine && !canDevelopNow && (
+            <p className="property-card-note property-card-note--timing">
+              Build and lift mortgages on your turn, before you roll or in the {Math.round(DEFAULT_TIMING.actionWindow / 1000)} seconds
+              after your move, selling and mortgaging are open any time
+            </p>
+          )}
+
           {mine && (
             <div className="property-card-actions">
               {!deed.mortgaged && details && (
@@ -667,8 +772,10 @@ export default function BoardGame({
                   <button
                     type="button"
                     className="property-action-btn"
-                    disabled={!Estate.canBuild(state.deeds, selectedProperty, BOARD_SPACES) || balance < details.houseCost}
-                    title="Own the full colour family and build evenly first"
+                    disabled={
+                      !canDevelopNow || !Estate.canBuild(state.deeds, selectedProperty, BOARD_SPACES) || balance < details.houseCost
+                    }
+                    title="Own the full colour family and build evenly first, on your turn"
                     onClick={() => act({ type: 'manage', spaceId: selectedProperty, action: 'build' })}
                   >
                     Build {deed.houses === 4 ? 'hotel' : 'house'} ({formatRupees(details.houseCost)})
@@ -698,7 +805,7 @@ export default function BoardGame({
                 <button
                   type="button"
                   className="property-action-btn"
-                  disabled={balance < Estate.unmortgageCost(selectedProperty, BOARD_SPACES)}
+                  disabled={!canDevelopNow || balance < Estate.unmortgageCost(selectedProperty, BOARD_SPACES)}
                   title="Includes 10% interest"
                   onClick={() => act({ type: 'manage', spaceId: selectedProperty, action: 'unmortgage' })}
                 >
@@ -798,6 +905,182 @@ export default function BoardGame({
   const offer = state.purchaseOffer;
   const deciding = offer && offer.playerId !== myPlayerId ? players.find((player) => player.id === offer.playerId) : null;
 
+  // A rent, tax, fine or Go pop up. The money moves only when it closes.
+  const renderNotice = () => {
+    const notice = state.notice;
+
+    if (!notice) {
+      return null;
+    }
+
+    const payer = players.find((player) => player.id === notice.playerId);
+    const gain = notice.amount > 0;
+    const canClose = notice.playerId === myPlayerId && isMyTurn;
+
+    return (
+      <div className="drawn-card-overlay">
+        <div className={`drawn-card notice-card notice-card--${notice.kind}`} role="status" aria-live="polite" key={notice.id}>
+          <span className="drawn-card-deck">{notice.title}</span>
+          <div className="drawn-card-rule" />
+          <strong className={`notice-amount ${gain ? 'amount-positive' : 'amount-negative'}`}>
+            {gain ? '+' : '−'}
+            {formatRupees(Math.abs(notice.amount))}
+          </strong>
+          <p className="drawn-card-text">{notice.text}</p>
+          <span className="drawn-card-holder">
+            {notice.playerId === myPlayerId ? 'Your balance' : `${payer?.name}'s balance`} updates when this closes
+          </span>
+          <span className="hold-timer" aria-hidden="true">
+            <span style={{ transform: `scaleX(${notice.length ? Math.min(1, noticeLeft / notice.length) : 0})` }} />
+          </span>
+          {canClose && (
+            <button type="button" className="text-link hold-close" onClick={() => act({ type: 'dismiss' })}>
+              {gain ? 'Collect now' : 'Pay now'}
+            </button>
+          )}
+        </div>
+      </div>
+    );
+  };
+
+  const renderDrawnCard = () => {
+    const card = state.drawnCard;
+
+    if (!card) {
+      return null;
+    }
+
+    return (
+      <div className="drawn-card-overlay">
+        <div className="drawn-card" role="status" aria-live="polite">
+          <span className="drawn-card-deck">{card.deckName}</span>
+          <div className="drawn-card-rule" />
+          <p className="drawn-card-text">{card.text}</p>
+          <span className="drawn-card-holder">Drawn by {card.playerId === myPlayerId ? 'you' : card.playerName}</span>
+          <span className="hold-timer" aria-hidden="true">
+            <span style={{ transform: `scaleX(${card.length ? Math.min(1, noticeLeft / card.length) : 0})` }} />
+          </span>
+          {card.playerId === myPlayerId && isMyTurn && (
+            <button type="button" className="text-link hold-close" onClick={() => act({ type: 'dismiss' })}>
+              Got it
+            </button>
+          )}
+        </div>
+      </div>
+    );
+  };
+
+  // Everyone's title deeds, open to the whole table.
+  const renderCardViewer = () => {
+    if (sheet !== 'cards') {
+      return null;
+    }
+
+    const shown = players.find((player) => player.id === cardsFor) || players[0];
+    const held = Object.keys(state.deeds)
+      .map(Number)
+      .filter((id) => state.deeds[id].owner === shown.id)
+      .sort((a, b) => a - b);
+
+    return (
+      <div className="property-card-overlay" onClick={() => setSheet(null)}>
+        <div
+          className="property-card cards-sheet"
+          onClick={(event) => event.stopPropagation()}
+          role="dialog"
+          aria-labelledby="cards-title"
+        >
+          <header className="property-card-header">
+            <p className="property-card-kicker">Title deeds</p>
+            <h3 id="cards-title">Everyone's cards</h3>
+            <button type="button" className="property-card-close" onClick={() => setSheet(null)} aria-label="Close">
+              ✕
+            </button>
+          </header>
+
+          <div className="cards-tabs" role="tablist">
+            {players.map((player) => {
+              const count = Object.values(state.deeds).filter((deed) => deed.owner === player.id).length;
+              return (
+                <button
+                  key={player.id}
+                  type="button"
+                  role="tab"
+                  aria-selected={player.id === shown.id}
+                  className={`cards-tab seat-${player.pieceKey} ${player.id === shown.id ? 'cards-tab--active' : ''}`}
+                  onClick={() => setCardsFor(player.id)}
+                >
+                  <PieceMark piece={player.pieceKey} variant="token" />
+                  <span>{player.id === myPlayerId ? 'You' : player.name}</span>
+                  <em>{count}</em>
+                </button>
+              );
+            })}
+          </div>
+
+          <div className="property-card-body">
+            <div className="cards-summary">
+              <span>Cash {formatRupees(state.balances[shown.id] || 0)}</span>
+              <span>Net worth {formatRupees(netWorths[shown.id] || 0)}</span>
+              {state.pardons[shown.id] > 0 && <span>{state.pardons[shown.id]} Get Out of Jail Free</span>}
+            </div>
+
+            {held.length === 0 ? (
+              <p className="cards-empty">{shown.id === myPlayerId ? 'You hold' : `${shown.name} holds`} no title deeds yet</p>
+            ) : (
+              <ul className="cards-grid">
+                {held.map((id, index) => {
+                  const space = BOARD_SPACES[id];
+                  const deed = state.deeds[id];
+                  return (
+                    <li key={id} style={{ '--reveal-delay': `${index * 0.04}s` }}>
+                      <button
+                        type="button"
+                        className={`deed-mini ${deed.mortgaged ? 'deed-mini--mortgaged' : ''}`}
+                        style={{ '--deed': spaceAccent(space) }}
+                        onClick={() => {
+                          setSheet(null);
+                          setSelectedProperty(id);
+                        }}
+                      >
+                        <span className="deed-mini-band">
+                          {space.art && <TileArt kind={space.art} />}
+                        </span>
+                        <strong>{space.name}</strong>
+                        <span>
+                          {deed.mortgaged
+                            ? 'Mortgaged'
+                            : deed.hotel
+                              ? 'Hotel'
+                              : deed.houses
+                                ? `${deed.houses} house${deed.houses > 1 ? 's' : ''}`
+                                : formatRupees(space.price)}
+                        </span>
+                      </button>
+                    </li>
+                  );
+                })}
+              </ul>
+            )}
+          </div>
+        </div>
+      </div>
+    );
+  };
+
+  const copyMyId = async () => {
+    try {
+      await navigator.clipboard.writeText(myCode);
+      setCopiedId(true);
+      window.setTimeout(() => setCopiedId(false), 2000);
+    } catch {
+      setCopiedId(false);
+    }
+  };
+
+  const actionSeconds = Math.ceil(actionLeft / 1000);
+  const actionShare = state.actionLength ? Math.min(1, actionLeft / state.actionLength) : 0;
+
   return (
     <main className="board-game-page">
       <header className="board-topbar">
@@ -826,6 +1109,21 @@ export default function BoardGame({
               {session.code}
             </span>
           )}
+          <button
+            type="button"
+            className="topbar-icon-button"
+            onClick={toggleFullscreen}
+            aria-label={isFullscreen ? 'Leave full screen' : 'Full screen'}
+            title={isFullscreen ? 'Leave full screen' : 'Full screen'}
+          >
+            <svg viewBox="0 0 24 24" aria-hidden="true">
+              {isFullscreen ? (
+                <path d="M9 4v5H4M15 4v5h5M9 20v-5H4M15 20v-5h5" />
+              ) : (
+                <path d="M4 9V4h5M20 9V4h-5M4 15v5h5M20 15v5h-5" />
+              )}
+            </svg>
+          </button>
           {onAudio && <SoundMixer audio={audioSettings} onAudio={onAudio} />}
           {canProposeEnd && (
             <button className="end-game-button" type="button" onClick={() => setSheet('end')}>
@@ -838,9 +1136,16 @@ export default function BoardGame({
         </div>
       </header>
 
+      {connection !== 'online' && (
+        <div className="reconnect-banner" role="status" aria-live="polite">
+          <span className="waiting-pulse" aria-hidden="true" />
+          Reconnecting to the table with your Player ID {myCode}
+        </div>
+      )}
+
       <section className="board-game-layout">
-        <div className="board-side">
-          <aside className="player-panel">
+        <aside className="board-side">
+          <section className="player-panel" aria-label="Players">
             <p className="eyebrow">The table</p>
 
             <div className="player-list">
@@ -848,7 +1153,7 @@ export default function BoardGame({
                 const bankrupt = state.bankrupt[player.id];
                 return (
                   <article
-                    className={`game-player seat-${player.pieceKey} ${index === state.activeIndex && !state.gameOver ? 'game-player--active' : ''} ${bankrupt ? 'game-player--bankrupt' : ''}`}
+                    className={`game-player seat-${player.pieceKey} ${index === state.activeIndex && !state.gameOver ? 'game-player--active' : ''} ${bankrupt ? 'game-player--bankrupt' : ''} ${player.away ? 'game-player--away' : ''}`}
                     key={player.id}
                   >
                     <span className="game-player-token">
@@ -864,13 +1169,15 @@ export default function BoardGame({
                         {bankrupt
                           ? 'Bankrupt'
                           : isDetained(player.id)
-                            ? `In Kaidi Kottai, attempt ${detainedFor(player.id) + 1} of ${DETENTION_MAX_ATTEMPTS}`
+                            ? `In Jail, attempt ${detainedFor(player.id) + 1} of ${DETENTION_MAX_ATTEMPTS}`
                             : index === state.activeIndex && !state.gameOver
-                              ? 'Taking a turn'
+                              ? player.away
+                                ? 'Away, the computer is playing'
+                                : 'Taking a turn'
                               : kindLabel(player)}
                       </span>
                       {state.pardons[player.id] > 0 && (
-                        <span className="player-pardons" title="Get Out of Kaidi Kottai Free">
+                        <span className="player-pardons" title="Get Out of Jail Free">
                           ⚖ {state.pardons[player.id]} pardon{state.pardons[player.id] > 1 ? 's' : ''} held
                         </span>
                       )}
@@ -882,17 +1189,29 @@ export default function BoardGame({
                 );
               })}
             </div>
-
-            <div className="match-notice">
-              <p className="match-notice-label">Latest move</p>
-              <p className="match-notice-text" aria-live="polite">
-                {state.activity}
-              </p>
-            </div>
-          </aside>
+          </section>
 
           {session && <ChatPanel session={session} compact />}
-        </div>
+
+          <section className="activity-log" aria-label="Activity log">
+            <p className="eyebrow">Activity</p>
+            {log.length === 0 ? (
+              <p className="activity-empty">{state.activity}</p>
+            ) : (
+              <ol aria-live="polite">
+                {[...log].reverse().map((entry) => {
+                  const actor = players.find((player) => player.id === entry.playerId);
+                  return (
+                    <li key={entry.id} className={actor ? `seat-${actor.pieceKey}` : ''}>
+                      <span className="activity-dot" aria-hidden="true" />
+                      {entry.text}
+                    </li>
+                  );
+                })}
+              </ol>
+            )}
+          </section>
+        </aside>
 
         <section className="game-board-area" aria-label="Manapally game board">
           <div className="game-board">
@@ -909,7 +1228,7 @@ export default function BoardGame({
                 <article
                   className={`board-space ${getSpaceClass(space)} ${isClickable ? 'board-space--clickable' : ''} ${
                     selectedProperty === space.id ? 'board-space--selected' : ''
-                  } ${owner ? 'board-space--owned' : ''}`}
+                  } ${owner ? 'board-space--owned' : ''} ${space.art ? 'board-space--art' : ''}`}
                   key={space.id}
                   style={{ gridColumn: column, gridRow: row }}
                   onClick={() => isClickable && setSelectedProperty(space.id)}
@@ -924,18 +1243,23 @@ export default function BoardGame({
                   aria-label={
                     isClickable
                       ? `${space.name}, ${owner ? `owned by ${owner.name}` : `for sale at ${formatRupees(space.price)}`}`
-                      : undefined
+                      : space.taxLabel
+                        ? `${space.name}, ${space.taxLabel}`
+                        : space.name
                   }
                 >
-                  <span className="space-name">
+                  <span className={`space-name ${nameFit(space)}`}>
                     {space.name}
-                    {space.subname && (
-                      <>
-                        <br />
-                        {space.subname}
-                      </>
-                    )}
+                    {space.subname && <small>{space.subname}</small>}
                   </span>
+
+                  {space.art && <TileArt kind={space.art} className="space-art" />}
+
+                  {space.taxLabel && (
+                    <span className="space-cost space-cost--tax">
+                      Pay <b>{formatRupees(TAXES[space.id])}</b>
+                    </span>
+                  )}
 
                   {/* Owned spaces swap the price label for a solid owner badge */}
                   {owner ? (
@@ -965,8 +1289,6 @@ export default function BoardGame({
                     space.price && <span className="space-cost">{formatCurrency(space.price)}</span>
                   )}
 
-                  {space.icon && !owner && <span className="space-icon">{space.icon}</span>}
-
                   {tokens.length > 0 && (
                     <div className="space-tokens">
                       {tokens.map((player) => (
@@ -990,10 +1312,10 @@ export default function BoardGame({
             <div className="board-centre-art">
               <BrandMark size={64} className="centre-crown" />
               <h1>Manapally</h1>
-              <p>Premium South Indian Strategy Board Game</p>
+              <p>Andhra Pradesh and Telangana edition</p>
               <div className="centre-divider" />
               <span className="centre-message">
-                Pass Rajyabhishekam
+                Pass Go
                 <br />
                 to receive {formatCurrency(START_REWARD)}
               </span>
@@ -1005,20 +1327,12 @@ export default function BoardGame({
             </div>
           </div>
 
-          {state.drawnCard && (
-            <div className="drawn-card-overlay">
-              <div className="drawn-card" role="status" aria-live="polite">
-                <span className="drawn-card-deck">{state.drawnCard.deckName}</span>
-                <div className="drawn-card-rule" />
-                <p className="drawn-card-text">{state.drawnCard.text}</p>
-                <span className="drawn-card-holder">Drawn by {state.drawnCard.playerName}</span>
-              </div>
-            </div>
-          )}
-
+          {renderDrawnCard()}
+          {renderNotice()}
           {renderPurchaseOffer()}
           {renderAuction()}
           {renderPropertyCard()}
+          {renderCardViewer()}
           {renderResults()}
 
           {sheet === 'dice' && (
@@ -1040,7 +1354,7 @@ export default function BoardGame({
                     <h4>Two standard dice</h4>
                     <p>
                       Each turn rolls two six sided dice showing 1 to 6 and your token moves their total,
-                      three doubles in a row sends you to Kaidi Kottai (Detention)
+                      three doubles in a row sends you to Jail
                     </p>
                   </div>
                   <div className="property-card-section">
@@ -1169,24 +1483,33 @@ export default function BoardGame({
                   <div className="property-card-section">
                     <h4>Net worth</h4>
                     <p>
-                      Cash plus the purchase value of every district, route and utility you hold, plus half
+                      Cash plus the purchase value of every district, station and utility you hold, plus half
                       the cost of your houses and hotels, mortgaged property counts at its value minus the
                       mortgage
                     </p>
                   </div>
                   <div className="property-card-section">
-                    <h4>Doubles and Kaidi Kottai</h4>
+                    <h4>Doubles and Jail</h4>
                     <p>
-                      Doubles earn another roll, while three doubles in one turn, the Go to Kaidi Kottai corner
-                      or certain cards send you to Kaidi Kottai, and to leave you can pay {formatRupees(DETENTION_FINE)}, spend
+                      Doubles earn another roll, while three doubles in one turn, the Go to Jail corner
+                      or certain cards send you to Jail, and to leave you can pay {formatRupees(DETENTION_FINE)}, spend
                       a pardon or roll doubles, after {DETENTION_MAX_ATTEMPTS} misses the fine is paid for you, and
                       you still collect rent while held
                     </p>
                   </div>
                   <div className="property-card-section">
+                    <h4>Your turn</h4>
+                    <p>
+                      Take as long as you like before rolling, then after your move you have{' '}
+                      {Math.round(DEFAULT_TIMING.actionWindow / 1000)} seconds to build houses and hotels before the
+                      turn passes on, or press End turn, rent, taxes and the Go reward move only once their pop up closes
+                    </p>
+                  </div>
+                  <div className="property-card-section">
                     <h4>Taxes</h4>
                     <p>
-                      Kandayam asks {formatRupees(TAXES[4])} and Vajra Tax asks {formatRupees(TAXES[38])}
+                      Income Tax asks {formatRupees(TAXES[4])} and Luxury Tax asks {formatRupees(TAXES[38])}, the amounts are
+                      printed on their spaces
                     </p>
                   </div>
                   <div className="property-card-section">
@@ -1230,8 +1553,14 @@ export default function BoardGame({
                 {state.gameOver
                   ? 'The match is over'
                   : activePlayer.id === myPlayerId
-                    ? 'The court awaits your decision'
-                    : `${kindLabel(activePlayer)} is making a move`}
+                    ? inActionWindow
+                      ? 'Build before your turn ends'
+                      : state.busy
+                        ? 'Your move is under way'
+                        : 'Take your time, roll when ready'
+                    : activePlayer.away
+                      ? 'Away, the computer is playing'
+                      : `${kindLabel(activePlayer)} is making a move`}
               </span>
             </div>
           </div>
@@ -1250,28 +1579,42 @@ export default function BoardGame({
             </span>
           </div>
 
-          <div className="dice-info-row">
-            <p className="dice-transparency-label">Secure roll by Web Crypto</p>
-            <button type="button" className="dice-info-button" onClick={() => setSheet('dice')}>
-              How the dice work
-            </button>
-          </div>
+          {state.turnPhase === 'actions' && !state.gameOver && (
+            <div className={`action-window ${actionSeconds <= 3 ? 'action-window--urgent' : ''}`} aria-live="polite">
+              <svg className="action-ring" viewBox="0 0 44 44" aria-hidden="true">
+                <circle cx="22" cy="22" r="19" />
+                <circle cx="22" cy="22" r="19" style={{ strokeDashoffset: `${119.4 * (1 - actionShare)}` }} />
+              </svg>
+              <strong>{actionSeconds}</strong>
+              <span>
+                {inActionWindow
+                  ? 'seconds to build houses and hotels before your turn ends'
+                  : `seconds for ${activePlayer.name} to build before the turn ends`}
+              </span>
+            </div>
+          )}
 
-          <GoldButton
-            loading={isMyTurn && state.busy && !state.gameOver}
-            disabled={!canRoll}
-            onClick={() => act({ type: 'roll' })}
-          >
-            {state.gameOver
-              ? 'Match complete'
-              : !amAlive
-                ? 'You are bankrupt'
-                : isMyTurn
-                  ? myDetention
-                    ? 'Roll for doubles'
-                    : 'Roll the dice'
-                  : `Waiting for ${activePlayer.name}`}
-          </GoldButton>
+          {inActionWindow ? (
+            <GoldButton onClick={() => act({ type: 'end-turn' })}>End turn</GoldButton>
+          ) : (
+            <GoldButton
+              loading={isMyTurn && state.busy && !state.gameOver}
+              disabled={!canRoll}
+              onClick={() => act({ type: 'roll' })}
+            >
+              {state.gameOver
+                ? 'Match complete'
+                : !amAlive
+                  ? 'You are bankrupt'
+                  : isMyTurn
+                    ? myDetention
+                      ? 'Roll for doubles'
+                      : rollAgain
+                        ? 'Doubles, roll again'
+                        : 'Roll the dice'
+                    : `Waiting for ${activePlayer.name}`}
+            </GoldButton>
+          )}
 
           {endVote && !state.gameOver && !mustVote && (
             <div className={`end-vote-status ${endVote.passed ? 'end-vote-status--passed' : ''}`} aria-live="polite">
@@ -1292,8 +1635,8 @@ export default function BoardGame({
           {myDetention && amAlive && !state.gameOver && (
             <div className="detention-panel">
               <p>
-                You are held in Kaidi Kottai, attempt {detainedFor(myPlayerId) + 1} of {DETENTION_MAX_ATTEMPTS},
-                roll doubles to walk free or leave now and roll as normal
+                You are in Jail, attempt {detainedFor(myPlayerId) + 1} of {DETENTION_MAX_ATTEMPTS}, roll doubles
+                to walk free or leave now and roll as normal
               </p>
               <div className="detention-actions">
                 <button
@@ -1317,8 +1660,8 @@ export default function BoardGame({
           )}
 
           {buildable.length > 0 && amAlive && (
-            <div className="build-prompt">
-              <p className="eyebrow">Ready to build</p>
+            <div className={`build-prompt ${canDevelopNow ? 'build-prompt--open' : ''}`}>
+              <p className="eyebrow">{canDevelopNow ? 'Ready to build' : 'Build on your turn'}</p>
               <div className="build-prompt-list">
                 {buildable.map(([family, spaceId]) => (
                   <button
@@ -1342,9 +1685,53 @@ export default function BoardGame({
             </button>
           )}
 
-          <p className="turn-tip">
-            Tap any district, route or utility on the board to see its owner, rent and building costs
-          </p>
+          {session && (
+            <section className="player-ids" aria-label="Player IDs">
+              <div className="player-ids-head">
+                <p className="eyebrow">Player IDs</p>
+                {myCode && (
+                  <button type="button" className="text-link" onClick={copyMyId}>
+                    {copiedId ? 'Copied' : 'Copy mine'}
+                  </button>
+                )}
+              </div>
+              <ul>
+                {players
+                  .filter((player) => player.code)
+                  .map((player) => (
+                    <li key={player.id} className={`seat-${player.pieceKey} ${player.id === myPlayerId ? 'is-mine' : ''}`}>
+                      <PieceMark piece={player.pieceKey} variant="token" />
+                      <span>{player.id === myPlayerId ? 'You' : player.name}</span>
+                      <code>{player.code}</code>
+                    </li>
+                  ))}
+              </ul>
+              <p className="player-ids-note">
+                Dropped out? Open Manapally, choose Rejoin and enter the room code with your Player ID
+              </p>
+            </section>
+          )}
+
+          <button
+            type="button"
+            className="view-cards-button"
+            onClick={() => {
+              setCardsFor(myPlayerId || players[0].id);
+              setSheet('cards');
+            }}
+          >
+            <svg viewBox="0 0 24 24" aria-hidden="true">
+              <path d="M7 4h11a2 2 0 0 1 2 2v12M4 8h11a2 2 0 0 1 2 2v9a2 2 0 0 1-2 2H6a2 2 0 0 1-2-2zM4 12h13" />
+            </svg>
+            View everyone's cards
+          </button>
+
+          <div className="dice-info-row">
+            <p className="dice-transparency-label">Secure roll by Web Crypto</p>
+            <button type="button" className="dice-info-button" onClick={() => setSheet('dice')}>
+              How the dice work
+            </button>
+          </div>
         </aside>
       </section>
     </main>

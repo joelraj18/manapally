@@ -354,6 +354,17 @@
   min-height: 52px;
 }
 
+.rejoin-row {
+  grid-template-columns: 1fr 1fr auto;
+}
+
+.rejoin-help {
+  margin: -6px 0 14px;
+  color: var(--ink-secondary);
+  font-size: 0.86rem;
+  line-height: 1.45;
+}
+
 .room-code-input {
   font-weight: 600;
   letter-spacing: 0.22em;
@@ -470,7 +481,8 @@
     gap: 8px;
   }
 
-  .join-room-row {
+  .join-room-row,
+  .rejoin-row {
     grid-template-columns: 1fr;
   }
 
