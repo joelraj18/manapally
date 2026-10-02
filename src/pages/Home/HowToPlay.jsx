@@ -12,8 +12,8 @@ const steps = [
     text: 'Press Roll the dice and your token walks clockwise, every space you land on has something to say',
   },
   {
-    title: 'Buy, build and collect',
-    text: 'Buy open districts, complete a colour family to build houses and a hotel, then collect rent from every visitor',
+    title: 'Buy, trade and build',
+    text: 'Buy open districts, trade with other players to complete a colour family, then build houses and a hotel and collect rent from every visitor',
   },
 ];
 

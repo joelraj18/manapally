@@ -1,4 +1,4 @@
-import GameEngine, { computeStandings, AUCTION_MIN_BID } from './gameEngine';
+import GameEngine, { computeStandings, AUCTION_MIN_BID, tradeProblem } from './gameEngine';
 import { TOTAL_MATCH_TURNS } from './matchRules';
 import { BOARD_SPACES } from './boardData';
 import * as Estate from './estate';
@@ -517,5 +517,161 @@ describe('turn rhythm', () => {
     expect(restored.state.deeds[39].owner).toBe('p2');
     engine.destroy();
     restored.destroy();
+  });
+});
+
+describe('trading', () => {
+  const free = (owner, extra = {}) => ({ owner, houses: 0, hotel: false, mortgaged: false, ...extra });
+  const table = (kinds = ['human', 'human']) => {
+    const engine = new GameEngine({ players: seats(kinds), timing: FAST, rollDie: () => 1, pickIndex: () => 0 });
+    engine.state.deeds = { 1: free('p1'), 11: free('p2'), 13: free('p2'), 6: free('p1') };
+    return engine;
+  };
+  const offer = (to, give, get, extra = {}) => ({
+    to,
+    give: { cash: 0, deeds: [], pardons: 0, ...give },
+    get: { cash: 0, deeds: [], pardons: 0, ...get },
+    ...extra,
+  });
+
+  test('cash and a deed for a deed swaps both ways when accepted', () => {
+    const engine = table();
+    expect(engine.proposeTrade('p1', offer('p2', { cash: 50000, deeds: [1] }, { deeds: [11] }))).toBe(true);
+    const [trade] = engine.state.trades;
+    expect(engine.respondTrade('p1', trade.id, true)).toBe(false); // only the recipient answers
+    expect(engine.respondTrade('p2', trade.id, true)).toBe(true);
+    expect(engine.state.deeds[1].owner).toBe('p2');
+    expect(engine.state.deeds[11].owner).toBe('p1');
+    expect(engine.state.balances).toEqual({ p1: 1450000, p2: 1550000 });
+    expect(engine.state.trades).toHaveLength(0);
+    expect(engine.state.log.at(-1).text).toContain('traded Koti and ₹50,000');
+    engine.destroy();
+  });
+
+  test('gifts, loans and cash for cash are refused', () => {
+    const engine = table();
+    expect(engine.proposeTrade('p1', offer('p2', { cash: 100000 }, {}))).toBe(false);
+    expect(engine.proposeTrade('p1', offer('p2', { deeds: [1] }, {}))).toBe(false);
+    expect(engine.proposeTrade('p1', offer('p2', { cash: 100000 }, { cash: 50000 }))).toBe(false);
+    expect(engine.proposeTrade('p1', offer('p2', { cash: 9000000 }, { deeds: [11] }))).toBe(false);
+    expect(engine.proposeTrade('p1', offer('p2', { deeds: [11] }, { cash: 10000 }))).toBe(false); // not theirs
+    expect(engine.proposeTrade('p1', offer('p1', { deeds: [1] }, { cash: 10000 }))).toBe(false);
+    engine.destroy();
+  });
+
+  test('a property in a family with buildings cannot be traded', () => {
+    const engine = table();
+    engine.state.deeds = { ...engine.state.deeds, 1: free('p1', { houses: 1 }), 3: free('p1') };
+    expect(tradeProblem(engine.state, { from: 'p1', to: 'p2', give: { cash: 0, deeds: [3], pardons: 0 }, get: { cash: 10000, deeds: [], pardons: 0 } }))
+      .toContain('Sell the buildings');
+    engine.state.deeds = { ...engine.state.deeds, 1: free('p1') };
+    expect(engine.proposeTrade('p1', offer('p2', { deeds: [3] }, { cash: 10000 }))).toBe(true);
+    engine.destroy();
+  });
+
+  test('a mortgaged deed costs the new owner 10% now and only the mortgage value later', () => {
+    const engine = table();
+    engine.state.deeds = { ...engine.state.deeds, 11: free('p2', { mortgaged: true }) };
+    engine.proposeTrade('p1', offer('p2', { cash: 50000 }, { deeds: [11] }, { mortgageChoice: { 11: 'interest' } }));
+    engine.respondTrade('p2', engine.state.trades[0].id, true);
+    // Guntur mortgages for 70,000: 10% is 7,000
+    expect(engine.state.balances.p1).toBe(1500000 - 50000 - 7000);
+    expect(engine.state.deeds[11]).toMatchObject({ owner: 'p1', mortgaged: true, interestPaid: true });
+    engine.state.turnPhase = 'pre-roll';
+    expect(engine.manageProperty('p1', 11, 'unmortgage')).toBe(true);
+    expect(engine.state.balances.p1).toBe(1500000 - 50000 - 7000 - 70000);
+    expect(engine.state.deeds[11].mortgaged).toBe(false);
+    engine.destroy();
+  });
+
+  test('lifting a mortgage on the trade pays the full payoff at once', () => {
+    const engine = table();
+    engine.state.deeds = { ...engine.state.deeds, 1: free('p1', { mortgaged: true }) };
+    engine.proposeTrade('p1', offer('p2', { deeds: [1] }, { cash: 20000 }));
+    engine.respondTrade('p2', engine.state.trades[0].id, true, { 1: 'lift' });
+    // Koti mortgages for 30,000: payoff is 33,000
+    expect(engine.state.balances.p2).toBe(1500000 - 20000 - 33000);
+    expect(engine.state.deeds[1]).toMatchObject({ owner: 'p2', mortgaged: false });
+    engine.destroy();
+  });
+
+  test('Get Out of Jail Free cards change hands', () => {
+    const engine = table();
+    engine.state.pardons = { p1: 1, p2: 0 };
+    engine.proposeTrade('p1', offer('p2', { pardons: 1 }, { cash: 40000 }));
+    engine.respondTrade('p2', engine.state.trades[0].id, true);
+    expect(engine.state.pardons).toEqual({ p1: 0, p2: 1 });
+    expect(engine.state.balances.p1).toBe(1540000);
+    engine.destroy();
+  });
+
+  test('an offer that no longer works fails on accept, and only the proposer can cancel', () => {
+    const engine = table();
+    engine.proposeTrade('p1', offer('p2', { deeds: [1] }, { deeds: [11] }));
+    const id = engine.state.trades[0].id;
+    engine.state.deeds = { ...engine.state.deeds, 11: free('p1') };
+    expect(engine.respondTrade('p2', id, true)).toBe(false);
+    expect(engine.state.trades).toHaveLength(0);
+
+    engine.state.deeds = { ...engine.state.deeds, 11: free('p2') };
+    engine.proposeTrade('p1', offer('p2', { deeds: [1] }, { deeds: [11] }));
+    const next = engine.state.trades[0].id;
+    expect(engine.cancelTrade('p2', next)).toBe(false);
+    expect(engine.cancelTrade('p1', next)).toBe(true);
+    expect(engine.state.trades).toHaveLength(0);
+    engine.destroy();
+  });
+
+  test('a computer accepts a generous offer and declines a poor one', async () => {
+    const engine = table(['human', 'bot']);
+    engine.proposeTrade('p1', offer('p2', { cash: 300000 }, { deeds: [11] }));
+    await new Promise((r) => setTimeout(r, 20));
+    expect(engine.state.deeds[11].owner).toBe('p1');
+
+    engine.proposeTrade('p1', offer('p2', { cash: 10000 }, { deeds: [13] }));
+    await new Promise((r) => setTimeout(r, 20));
+    expect(engine.state.deeds[13].owner).toBe('p2');
+    expect(engine.state.trades).toHaveLength(0);
+    engine.destroy();
+  });
+
+  test('offers to a player who drops out are withdrawn', () => {
+    const players = seats(['human', 'human']);
+    players[1].clientId = 'guest';
+    const engine = new GameEngine({ players, timing: FAST });
+    engine.state.deeds = { 1: free('p1'), 11: free('p2') };
+    engine.proposeTrade('p1', offer('p2', { deeds: [1] }, { deeds: [11] }));
+    engine.setAway('p2', true);
+    expect(engine.state.trades).toHaveLength(0);
+    engine.destroy();
+  });
+
+  test('trades work in the middle of a turn and while in Jail', async () => {
+    const engine = new GameEngine({ players: seats(['human', 'human']), timing: { ...FAST, actionWindow: 80 }, pickIndex: () => 0 });
+    engine.state.deeds = { 1: free('p1'), 3: free('p1'), 11: free('p2') }; // the roll lands on p1's own Abids
+    engine.state.detained = { p1: null, p2: 0 };
+    engine.state.positions = { p1: 0, p2: 10 };
+    const queue = [1, 2];
+    engine.rollDie = () => queue.shift() ?? 1;
+    const turn = engine.playTurn('p1');
+    await new Promise((r) => setTimeout(r, 20));
+    expect(engine.state.turnPhase).toBe('actions');
+    // p2 is in Jail and it is p1's turn, yet p2 can still trade
+    expect(engine.proposeTrade('p2', offer('p1', { deeds: [11] }, { deeds: [1] }))).toBe(true);
+    expect(engine.respondTrade('p1', engine.state.trades[0].id, true)).toBe(true);
+    expect(engine.state.deeds[1].owner).toBe('p2');
+    engine.endTurnEarly('p1');
+    await turn;
+    engine.destroy();
+  });
+
+  test('a house going up withdraws offers on that family', () => {
+    const engine = table();
+    engine.state.deeds = { ...engine.state.deeds, 3: free('p1') };
+    engine.proposeTrade('p1', offer('p2', { deeds: [3] }, { cash: 10000 }));
+    engine.state.turnPhase = 'pre-roll';
+    expect(engine.manageProperty('p1', 1, 'build')).toBe(true);
+    expect(engine.state.trades).toHaveLength(0);
+    engine.destroy();
   });
 });

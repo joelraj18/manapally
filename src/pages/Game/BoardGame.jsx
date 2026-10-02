@@ -16,6 +16,10 @@ import GameEngine, {
   DETENTION_MAX_ATTEMPTS,
   TAXES,
   createInitialState,
+  familyHasBuildings,
+  liftCost,
+  mortgageFee,
+  tradeProblem,
 } from './gameEngine';
 import { START_REWARD, TOTAL_MATCH_TURNS } from './matchRules';
 import { PIECES, PieceMark } from './pieces.jsx';
@@ -156,6 +160,9 @@ export default function BoardGame({
   const [selectedProperty, setSelectedProperty] = useState(null);
   const [sheet, setSheet] = useState(null); // 'dice' | 'match' | 'end' | 'cards' | null
   const [cardsFor, setCardsFor] = useState(null);
+  const [tradeDraft, setTradeDraft] = useState(null); // the offer being composed
+  const [tradeChoices, setTradeChoices] = useState({}); // mortgage choices on an incoming offer
+  const [hiddenTrades, setHiddenTrades] = useState([]); // incoming offers put aside for later
   const [showResults, setShowResults] = useState(true);
   const engineRef = useRef(null);
 
@@ -234,6 +241,15 @@ export default function BoardGame({
           break;
         case 'dismiss':
           engine.dismiss(player.id);
+          break;
+        case 'trade-propose':
+          engine.proposeTrade(player.id, action.offer);
+          break;
+        case 'trade-respond':
+          engine.respondTrade(player.id, action.tradeId, Boolean(action.accept), action.mortgageChoice);
+          break;
+        case 'trade-cancel':
+          engine.cancelTrade(player.id, action.tradeId);
           break;
         default:
           break;
@@ -332,6 +348,15 @@ export default function BoardGame({
         case 'dismiss':
           engine.dismiss(myPlayerId);
           break;
+        case 'trade-propose':
+          engine.proposeTrade(myPlayerId, action.offer);
+          break;
+        case 'trade-respond':
+          engine.respondTrade(myPlayerId, action.tradeId, Boolean(action.accept), action.mortgageChoice);
+          break;
+        case 'trade-cancel':
+          engine.cancelTrade(myPlayerId, action.tradeId);
+          break;
         default:
           break;
       }
@@ -407,6 +432,7 @@ export default function BoardGame({
       if (event.key === 'Escape') {
         setSelectedProperty(null);
         setSheet(null);
+        setTradeDraft(null);
       }
     };
 
@@ -805,11 +831,11 @@ export default function BoardGame({
                 <button
                   type="button"
                   className="property-action-btn"
-                  disabled={!canDevelopNow || balance < Estate.unmortgageCost(selectedProperty, BOARD_SPACES)}
-                  title="Includes 10% interest"
+                  disabled={!canDevelopNow || balance < liftCost(deed, selectedProperty)}
+                  title={deed.interestPaid ? 'The 10% fee was paid when you traded for it' : 'Includes 10% interest'}
                   onClick={() => act({ type: 'manage', spaceId: selectedProperty, action: 'unmortgage' })}
                 >
-                  Unmortgage ({formatRupees(Estate.unmortgageCost(selectedProperty, BOARD_SPACES))})
+                  Unmortgage ({formatRupees(liftCost(deed, selectedProperty))})
                 </button>
               )}
             </div>
@@ -971,6 +997,323 @@ export default function BoardGame({
   };
 
   // Everyone's title deeds, open to the whole table.
+  // ------------------------------------------------------------ trading
+
+  const trades = state.trades || [];
+  const nameOf = (id) => players.find((player) => player.id === id)?.name || 'A player';
+  const tradePartners = players.filter((player) => player.id !== myPlayerId && !state.bankrupt[player.id]);
+  const canTrade = Boolean(me) && amAlive && !state.gameOver && tradePartners.length > 0;
+  const myOffers = trades.filter((trade) => trade.from === myPlayerId);
+  const offersToMe = trades.filter((trade) => trade.to === myPlayerId);
+  const incoming = offersToMe.find((trade) => !hiddenTrades.includes(trade.id));
+  const blankSide = () => ({ cash: 0, deeds: [], pardons: 0 });
+  const deedsOf = (id) =>
+    Object.keys(state.deeds)
+      .map(Number)
+      .filter((spaceId) => state.deeds[spaceId].owner === id)
+      .sort((a, b) => a - b);
+
+  const openTrade = (to, preset = {}) => {
+    setSheet(null);
+    setTradeDraft({
+      to: to || tradePartners[0]?.id,
+      give: blankSide(),
+      get: blankSide(),
+      mortgageChoice: {},
+      ...preset,
+    });
+  };
+
+  const describeSide = (side) => {
+    const parts = [
+      ...side.deeds.map((id) => BOARD_SPACES[id].name),
+      side.cash > 0 ? formatRupees(side.cash) : null,
+      side.pardons > 0 ? 'Get Out of Jail Free card' : null,
+    ].filter(Boolean);
+    return parts.length ? parts.join(', ') : 'Nothing yet';
+  };
+
+  // One side of a deal: deeds to tick, cash to add and a Jail Free card.
+  const renderTradeSide = (key, ownerId, title) => {
+    const side = tradeDraft[key];
+    const owned = deedsOf(ownerId);
+    const cashLimit = state.balances[ownerId] || 0;
+    const pardonsHeld = state.pardons[ownerId] || 0;
+    const update = (patch) => setTradeDraft((draft) => ({ ...draft, [key]: { ...draft[key], ...patch } }));
+    const setCash = (value) => update({ cash: Math.max(0, Math.min(cashLimit, Math.floor(value) || 0)) });
+
+    return (
+      <div className="trade-side">
+        <h4>{title}</h4>
+
+        {owned.length === 0 ? (
+          <p className="trade-empty">No properties</p>
+        ) : (
+          <ul className="trade-deeds">
+            {owned.map((id) => {
+              const space = BOARD_SPACES[id];
+              const deed = state.deeds[id];
+              const locked = familyHasBuildings(state.deeds, id);
+              const picked = side.deeds.includes(id);
+
+              return (
+                <li key={id}>
+                  <button
+                    type="button"
+                    className={`trade-deed ${picked ? 'trade-deed--picked' : ''}`}
+                    style={{ '--deed': spaceAccent(space) }}
+                    disabled={locked}
+                    aria-pressed={picked}
+                    onClick={() =>
+                      update({ deeds: picked ? side.deeds.filter((entry) => entry !== id) : [...side.deeds, id] })
+                    }
+                  >
+                    <span className="trade-deed-band" aria-hidden="true" />
+                    <strong>{space.name}</strong>
+                    <span>
+                      {locked ? 'Sell buildings first' : deed.mortgaged ? 'Mortgaged' : formatRupees(space.price)}
+                    </span>
+                    <i className="trade-deed-check" aria-hidden="true">
+                      ✓
+                    </i>
+                  </button>
+                </li>
+              );
+            })}
+          </ul>
+        )}
+
+        <label className="trade-cash">
+          <span>Cash</span>
+          <input
+            type="number"
+            min="0"
+            step="10000"
+            max={cashLimit}
+            inputMode="numeric"
+            value={side.cash || ''}
+            placeholder="₹0"
+            onChange={(event) => setCash(Number(event.target.value))}
+            aria-label={`${title} cash`}
+          />
+        </label>
+        <div className="trade-cash-steps">
+          {[10000, 50000, 100000].map((step) => (
+            <button key={step} type="button" onClick={() => setCash(side.cash + step)} disabled={side.cash + step > cashLimit}>
+              + {formatCurrency(step)}
+            </button>
+          ))}
+          {side.cash > 0 && (
+            <button type="button" onClick={() => setCash(0)}>
+              Clear
+            </button>
+          )}
+        </div>
+        <p className="trade-limit">Up to {formatRupees(cashLimit)}</p>
+
+        {pardonsHeld > 0 && (
+          <button
+            type="button"
+            className={`trade-pardon ${side.pardons ? 'trade-pardon--picked' : ''}`}
+            aria-pressed={side.pardons > 0}
+            onClick={() => update({ pardons: side.pardons ? 0 : 1 })}
+          >
+            ⚖ Get Out of Jail Free card
+          </button>
+        )}
+      </div>
+    );
+  };
+
+  const renderMortgageChoices = (ids, choices, onChoose) => {
+    const mortgaged = ids.filter((id) => state.deeds[id]?.mortgaged);
+
+    if (mortgaged.length === 0) {
+      return null;
+    }
+
+    return (
+      <div className="trade-mortgages">
+        <h4>Mortgaged properties you receive</h4>
+        {mortgaged.map((id) => (
+          <div className="trade-mortgage" key={id}>
+            <span>{BOARD_SPACES[id].name}</span>
+            <div role="radiogroup" aria-label={`${BOARD_SPACES[id].name} mortgage`}>
+              {['interest', 'lift'].map((choice) => (
+                <button
+                  key={choice}
+                  type="button"
+                  role="radio"
+                  aria-checked={(choices[id] || 'interest') === choice}
+                  className={(choices[id] || 'interest') === choice ? 'is-picked' : ''}
+                  onClick={() => onChoose(id, choice)}
+                >
+                  {choice === 'interest' ? 'Pay 10% now' : 'Lift mortgage'} {formatRupees(mortgageFee(id, choice))}
+                </button>
+              ))}
+            </div>
+          </div>
+        ))}
+        <p className="trade-note">
+          Paying 10% keeps it mortgaged, lifting it later then costs just the mortgage value
+        </p>
+      </div>
+    );
+  };
+
+  const renderTradeComposer = () => {
+    if (!tradeDraft || !canTrade) {
+      return null;
+    }
+
+    const partner = players.find((player) => player.id === tradeDraft.to) || tradePartners[0];
+    const trade = { from: myPlayerId, to: partner.id, give: tradeDraft.give, get: tradeDraft.get };
+    const problem = tradeProblem(state, trade, tradeDraft.mortgageChoice);
+    const untouched =
+      !trade.give.deeds.length && !trade.get.deeds.length && !trade.give.cash && !trade.get.cash && !trade.give.pardons && !trade.get.pardons;
+
+    return (
+      <div className="property-card-overlay end-overlay" onClick={() => setTradeDraft(null)}>
+        <div className="property-card trade-sheet" onClick={(event) => event.stopPropagation()} role="dialog" aria-labelledby="trade-title">
+          <header className="property-card-header">
+            <p className="property-card-kicker">Propose a deal</p>
+            <h3 id="trade-title">Trade with {partner.name}</h3>
+            <button type="button" className="property-card-close" onClick={() => setTradeDraft(null)} aria-label="Close">
+              ✕
+            </button>
+          </header>
+
+          {tradePartners.length > 1 && (
+            <div className="cards-tabs" role="tablist">
+              {tradePartners.map((player) => (
+                <button
+                  key={player.id}
+                  type="button"
+                  role="tab"
+                  aria-selected={player.id === partner.id}
+                  className={`cards-tab seat-${player.pieceKey} ${player.id === partner.id ? 'cards-tab--active' : ''}`}
+                  onClick={() => setTradeDraft((draft) => ({ ...draft, to: player.id, get: blankSide(), mortgageChoice: {} }))}
+                >
+                  <PieceMark piece={player.pieceKey} variant="token" />
+                  <span>{player.name}</span>
+                </button>
+              ))}
+            </div>
+          )}
+
+          <div className="property-card-body">
+            <div className="trade-columns">
+              {renderTradeSide('give', myPlayerId, 'You give')}
+              <span className="trade-swap" aria-hidden="true">
+                <svg viewBox="0 0 24 24">
+                  <path d="M4 8h14l-4-4M20 16H6l4 4" />
+                </svg>
+              </span>
+              {renderTradeSide('get', partner.id, `You ask ${partner.name} for`)}
+            </div>
+
+            {renderMortgageChoices(tradeDraft.get.deeds, tradeDraft.mortgageChoice, (id, choice) =>
+              setTradeDraft((draft) => ({ ...draft, mortgageChoice: { ...draft.mortgageChoice, [id]: choice } })),
+            )}
+
+            <div className="trade-summary">
+              <p>
+                <span>You give</span> {describeSide(trade.give)}
+              </p>
+              <p>
+                <span>You get</span> {describeSide(trade.get)}
+              </p>
+            </div>
+
+            {problem && !untouched && <p className="trade-problem">{problem}</p>}
+
+            <div className="purchase-offer-actions">
+              <GoldButton
+                disabled={Boolean(problem)}
+                onClick={() => {
+                  act({ type: 'trade-propose', offer: { ...trade, mortgageChoice: tradeDraft.mortgageChoice } });
+                  setTradeDraft(null);
+                }}
+              >
+                Send offer
+              </GoldButton>
+              <GoldButton variant="ghost" onClick={() => setTradeDraft(null)}>
+                Cancel
+              </GoldButton>
+            </div>
+            <p className="trade-note">
+              Both players must agree, buildings cannot be traded, and gifts or loans are not allowed
+            </p>
+          </div>
+        </div>
+      </div>
+    );
+  };
+
+  const renderIncomingTrade = () => {
+    if (!incoming || tradeDraft || state.gameOver) {
+      return null;
+    }
+
+    const choices = tradeChoices[incoming.id] || {};
+    const problem = tradeProblem(state, incoming, { ...incoming.mortgageChoice, ...choices });
+    const proposer = players.find((player) => player.id === incoming.from);
+
+    return (
+      <div className="property-card-overlay end-overlay">
+        <div className="property-card trade-sheet trade-sheet--incoming" role="dialog" aria-labelledby="trade-offer-title">
+          <header className="property-card-header">
+            <p className="property-card-kicker">Trade offer</p>
+            <h3 id="trade-offer-title">{proposer?.name} wants to trade</h3>
+          </header>
+          <div className="property-card-body">
+            <div className="trade-summary trade-summary--large">
+              <p>
+                <span>You receive</span> {describeSide(incoming.give)}
+              </p>
+              <p>
+                <span>You give</span> {describeSide(incoming.get)}
+              </p>
+            </div>
+
+            {renderMortgageChoices(incoming.give.deeds, choices, (id, choice) =>
+              setTradeChoices((all) => ({ ...all, [incoming.id]: { ...choices, [id]: choice } })),
+            )}
+
+            {problem && <p className="trade-problem">{problem}</p>}
+
+            <div className="purchase-offer-actions">
+              <GoldButton
+                disabled={Boolean(problem)}
+                onClick={() => act({ type: 'trade-respond', tradeId: incoming.id, accept: true, mortgageChoice: choices })}
+              >
+                Accept
+              </GoldButton>
+              <GoldButton variant="ghost" onClick={() => act({ type: 'trade-respond', tradeId: incoming.id, accept: false })}>
+                Decline
+              </GoldButton>
+            </div>
+            <div className="trade-incoming-links">
+              <button
+                type="button"
+                className="text-link"
+                onClick={() => {
+                  act({ type: 'trade-respond', tradeId: incoming.id, accept: false });
+                  openTrade(incoming.from, { give: { ...incoming.get }, get: { ...incoming.give } });
+                }}
+              >
+                Counter offer
+              </button>
+              <button type="button" className="text-link" onClick={() => setHiddenTrades((list) => [...list, incoming.id])}>
+                Decide later
+              </button>
+            </div>
+          </div>
+        </div>
+      </div>
+    );
+  };
+
   const renderCardViewer = () => {
     if (sheet !== 'cards') {
       return null;
@@ -1185,6 +1528,11 @@ export default function BoardGame({
 
                     <AnimatedBalance value={state.balances[player.id]} className="game-player-balance" />
                     <span className="game-player-worth">Net worth {formatRupees(netWorths[player.id])}</span>
+                    {canTrade && player.id !== myPlayerId && !bankrupt && (
+                      <button type="button" className="game-player-trade" onClick={() => openTrade(player.id)}>
+                        Trade
+                      </button>
+                    )}
                   </article>
                 );
               })}
@@ -1333,6 +1681,8 @@ export default function BoardGame({
           {renderAuction()}
           {renderPropertyCard()}
           {renderCardViewer()}
+          {renderTradeComposer()}
+          {renderIncomingTrade()}
           {renderResults()}
 
           {sheet === 'dice' && (
@@ -1517,6 +1867,15 @@ export default function BoardGame({
                     <p>
                       Own every district in a colour family to build, one house at a time and evenly across the
                       family, a fifth build becomes a hotel and buildings sell back for half their cost
+                    </p>
+                  </div>
+                  <div className="property-card-section">
+                    <h4>Trading</h4>
+                    <p>
+                      Trade properties, cash and Get Out of Jail Free cards with any player at any time, even
+                      on another turn or from Jail, both sides must give something, houses and hotels cannot be
+                      traded so sell every building in a colour family before trading any of it, and whoever
+                      receives a mortgaged property pays the bank 10% of the mortgage at once or lifts it in full
                     </p>
                   </div>
                   <div className="property-card-section">
@@ -1710,6 +2069,43 @@ export default function BoardGame({
                 Dropped out? Open Manapally, choose Rejoin and enter the room code with your Player ID
               </p>
             </section>
+          )}
+
+          {(myOffers.length > 0 || offersToMe.length > 0) && (
+            <section className="trade-pending" aria-label="Trade offers">
+              <p className="eyebrow">Trade offers</p>
+              <ul>
+                {offersToMe.map((trade) => (
+                  <li key={trade.id}>
+                    <span>From {nameOf(trade.from)}</span>
+                    <button
+                      type="button"
+                      className="text-link"
+                      onClick={() => setHiddenTrades((list) => list.filter((id) => id !== trade.id))}
+                    >
+                      Review
+                    </button>
+                  </li>
+                ))}
+                {myOffers.map((trade) => (
+                  <li key={trade.id}>
+                    <span>To {nameOf(trade.to)}, waiting</span>
+                    <button type="button" className="text-link" onClick={() => act({ type: 'trade-cancel', tradeId: trade.id })}>
+                      Withdraw
+                    </button>
+                  </li>
+                ))}
+              </ul>
+            </section>
+          )}
+
+          {canTrade && (
+            <button type="button" className="view-cards-button trade-button" onClick={() => openTrade()}>
+              <svg viewBox="0 0 24 24" aria-hidden="true">
+                <path d="M4 8h14l-4-4M20 16H6l4 4" />
+              </svg>
+              Trade
+            </button>
           )}
 
           <button

@@ -2085,6 +2085,12 @@
 /* The end game sheets sit above any card or auction in progress */
 .end-overlay {
   z-index: 150;
+  /* The game top bar stays above these sheets, so they open below it */
+  padding-top: 68px;
+}
+
+.end-overlay .trade-sheet {
+  max-height: calc(100dvh - 88px);
 }
 
 /* Special tile illustrations */
@@ -2681,5 +2687,356 @@
 
   .property-card-note--timing {
     margin: 0 22px 14px;
+  }
+}
+
+/* Trading */
+
+.game-player-trade {
+  justify-self: start;
+  margin-top: 2px;
+  padding: 3px 10px;
+  color: var(--sage-700);
+  background: var(--sage-100);
+  border: 0;
+  border-radius: var(--radius-pill);
+  cursor: pointer;
+  font: inherit;
+  font-size: 0.74rem;
+  font-weight: 600;
+  transition:
+    background 0.3s var(--ease),
+    transform 0.3s var(--ease-spring);
+}
+
+.game-player-trade:hover {
+  background: var(--sage-200);
+  transform: translateY(-1px);
+}
+
+.trade-button {
+  color: #ffffff;
+  background: var(--accent);
+}
+
+.trade-button:hover {
+  background: var(--sage-700);
+}
+
+.trade-pending {
+  margin-top: 14px;
+  padding: 12px 14px;
+  background: #f6ecd2;
+  border-radius: 16px;
+  animation: rise 0.5s var(--ease-spring) backwards;
+}
+
+.trade-pending .eyebrow {
+  margin-bottom: 6px;
+}
+
+.trade-pending ul {
+  display: grid;
+  gap: 4px;
+  margin: 0;
+  padding: 0;
+  list-style: none;
+}
+
+.trade-pending li {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 10px;
+  color: var(--ink-secondary);
+  font-size: 0.82rem;
+}
+
+.trade-sheet {
+  width: min(760px, 100%);
+  max-height: calc(100dvh - 40px);
+  overflow-y: auto;
+}
+
+.trade-sheet--incoming {
+  width: min(480px, 100%);
+}
+
+.trade-columns {
+  display: grid;
+  grid-template-columns: minmax(0, 1fr) 36px minmax(0, 1fr);
+  align-items: start;
+  gap: 10px;
+}
+
+.trade-swap {
+  display: grid;
+  width: 36px;
+  height: 36px;
+  margin-top: 34px;
+  place-items: center;
+  color: var(--sage-700);
+  background: var(--sage-100);
+  border-radius: 50%;
+}
+
+.trade-swap svg,
+.trade-button svg {
+  width: 18px;
+  height: 18px;
+  fill: none;
+  stroke: currentColor;
+  stroke-linecap: round;
+  stroke-linejoin: round;
+  stroke-width: 1.8;
+}
+
+.trade-side {
+  display: grid;
+  gap: 8px;
+  min-width: 0;
+  padding: 14px;
+  background: var(--canvas);
+  border-radius: 18px;
+}
+
+.trade-side h4 {
+  margin: 0 0 2px;
+  font-size: 0.9rem;
+}
+
+.trade-empty,
+.trade-limit,
+.trade-note {
+  color: var(--ink-tertiary);
+  font-size: 0.76rem;
+  line-height: 1.4;
+}
+
+.trade-deeds {
+  display: grid;
+  grid-template-columns: repeat(auto-fill, minmax(104px, 1fr));
+  gap: 6px;
+  max-height: 220px;
+  margin: 0;
+  padding: 2px;
+  overflow-y: auto;
+  list-style: none;
+}
+
+.trade-deed {
+  position: relative;
+  display: grid;
+  gap: 1px;
+  width: 100%;
+  padding: 0 0 8px;
+  overflow: hidden;
+  color: var(--ink);
+  text-align: left;
+  background: var(--surface);
+  border: 1px solid var(--hairline);
+  border-radius: 12px;
+  cursor: pointer;
+  font: inherit;
+  transition:
+    transform 0.3s var(--ease-spring),
+    box-shadow 0.3s var(--ease),
+    border-color 0.3s var(--ease);
+}
+
+.trade-deed-band {
+  height: 8px;
+  margin-bottom: 5px;
+  background: var(--deed);
+}
+
+.trade-deed strong,
+.trade-deed > span:not(.trade-deed-band) {
+  padding: 0 9px;
+}
+
+.trade-deed strong {
+  font-size: 0.82rem;
+}
+
+.trade-deed > span:not(.trade-deed-band) {
+  color: var(--ink-tertiary);
+  font-size: 0.7rem;
+}
+
+.trade-deed-check {
+  position: absolute;
+  top: 12px;
+  right: 7px;
+  display: grid;
+  width: 18px;
+  height: 18px;
+  place-items: center;
+  color: #ffffff;
+  background: var(--accent);
+  border-radius: 50%;
+  font-size: 0.66rem;
+  font-style: normal;
+  opacity: 0;
+  transform: scale(0.4);
+  transition:
+    opacity 0.25s var(--ease),
+    transform 0.35s var(--ease-spring);
+}
+
+.trade-deed:hover:not(:disabled) {
+  transform: translateY(-2px);
+  box-shadow: 0 8px 18px rgba(40, 50, 28, 0.12);
+}
+
+.trade-deed--picked {
+  border-color: var(--accent);
+  box-shadow: 0 0 0 1.5px var(--accent);
+}
+
+.trade-deed--picked .trade-deed-check {
+  opacity: 1;
+  transform: none;
+}
+
+.trade-deed:disabled {
+  cursor: not-allowed;
+  opacity: 0.5;
+}
+
+.trade-cash {
+  display: flex;
+  align-items: center;
+  gap: 10px;
+  font-size: 0.84rem;
+  font-weight: 600;
+}
+
+.trade-cash input {
+  flex: 1;
+  min-width: 0;
+  padding: 9px 12px;
+  color: var(--ink);
+  background: var(--surface);
+  border: 1px solid var(--hairline);
+  border-radius: 12px;
+  font: inherit;
+  font-variant-numeric: tabular-nums;
+}
+
+.trade-cash input:focus {
+  border-color: var(--accent);
+  outline: none;
+  box-shadow: 0 0 0 3px rgba(86, 105, 63, 0.18);
+}
+
+.trade-cash-steps {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 5px;
+}
+
+.trade-cash-steps button,
+.trade-pardon,
+.trade-mortgage button {
+  padding: 5px 10px;
+  color: var(--sage-700);
+  background: var(--surface);
+  border: 1px solid var(--hairline);
+  border-radius: var(--radius-pill);
+  cursor: pointer;
+  font: inherit;
+  font-size: 0.74rem;
+  font-weight: 600;
+  transition:
+    background 0.25s var(--ease),
+    border-color 0.25s var(--ease);
+}
+
+.trade-cash-steps button:disabled {
+  cursor: not-allowed;
+  opacity: 0.45;
+}
+
+.trade-pardon--picked,
+.trade-mortgage button.is-picked {
+  color: #ffffff;
+  background: var(--accent);
+  border-color: var(--accent);
+}
+
+.trade-mortgages {
+  display: grid;
+  gap: 8px;
+  margin-top: 14px;
+  padding: 14px;
+  background: #f6ecd2;
+  border-radius: 16px;
+}
+
+.trade-mortgages h4 {
+  margin: 0;
+  font-size: 0.86rem;
+}
+
+.trade-mortgage {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  justify-content: space-between;
+  gap: 8px;
+  font-size: 0.84rem;
+}
+
+.trade-mortgage > div {
+  display: flex;
+  gap: 5px;
+}
+
+.trade-summary {
+  display: grid;
+  gap: 4px;
+  margin-top: 14px;
+  padding: 12px 14px;
+  border: 1px solid var(--hairline);
+  border-radius: 14px;
+  font-size: 0.86rem;
+}
+
+.trade-summary span {
+  display: inline-block;
+  min-width: 84px;
+  color: var(--ink-tertiary);
+  font-weight: 600;
+}
+
+.trade-summary--large {
+  margin-top: 0;
+  font-size: 0.98rem;
+}
+
+.trade-problem {
+  margin-top: 10px;
+  color: var(--danger, #b3442e);
+  font-size: 0.82rem;
+  font-weight: 500;
+}
+
+.trade-incoming-links {
+  display: flex;
+  justify-content: center;
+  gap: 22px;
+  margin-top: 10px;
+}
+
+@media (max-width: 620px) {
+  .trade-columns {
+    grid-template-columns: 1fr;
+  }
+
+  .trade-swap {
+    justify-self: center;
+    margin: 0;
+    transform: rotate(90deg);
   }
 }
