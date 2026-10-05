@@ -5,7 +5,7 @@ import * as Estate from './estate';
 
 const FAST = {
   roll: 0, step: 0, afterRoll: 0, card: 0, turnGap: 0, botDelay: 0,
-  notice: 0, actionWindow: 0, auction: 30, auctionExtend: 10, botBidGap: 5, remoteDecision: 50, advisor: 20,
+  notice: 0, actionWindow: 0, debt: 0, auction: 30, auctionExtend: 10, botBidGap: 5, remoteDecision: 50, advisor: 20,
 };
 
 const seats = (kinds) =>
@@ -672,6 +672,115 @@ describe('trading', () => {
     engine.state.turnPhase = 'pre-roll';
     expect(engine.manageProperty('p1', 1, 'build')).toBe(true);
     expect(engine.state.trades).toHaveLength(0);
+    engine.destroy();
+  });
+});
+
+describe('raising cash for a debt', () => {
+  // Seat 1 owns Koti and Abids with a house on each, plus Uppal, and has
+  // little cash; Seat 2 is owed.
+  const setup = (kinds = ['human', 'human'], debt = 300) => {
+    const engine = new GameEngine({ players: seats(kinds), timing: { ...FAST, debt } });
+    const koti = BOARD_SPACES.find((space) => space.name === 'Koti').id;
+    const abids = BOARD_SPACES.find((space) => space.name === 'Abids').id;
+    const uppal = BOARD_SPACES.find((space) => space.name === 'Uppal').id;
+    engine.set({
+      deeds: {
+        [koti]: { owner: 'p1', houses: 1, hotel: false, mortgaged: false },
+        [abids]: { owner: 'p1', houses: 1, hotel: false, mortgaged: false },
+        [uppal]: { owner: 'p1', houses: 0, hotel: false, mortgaged: false },
+      },
+      balances: { p1: 10000, p2: 100000 },
+    });
+    return { engine, koti, abids, uppal, say: () => {} };
+  };
+
+  test('a person short of cash chooses to sell a house and the debt is paid', async () => {
+    const { engine, koti, say } = setup();
+    const paying = engine.collect('p1', 30000, 'p2', say, 'rent at Kadapa');
+    await new Promise((resolve) => setTimeout(resolve, 10));
+
+    expect(engine.state.debt).toMatchObject({ playerId: 'p1', amount: 30000, creditorId: 'p2', reason: 'rent at Kadapa' });
+    // Building is closed while in debt, selling is open.
+    expect(engine.manageProperty('p1', koti, 'build')).toBe(false);
+    expect(engine.manageProperty('p1', koti, 'sell')).toBe(true);
+
+    expect(await paying).toBe(30000);
+    expect(engine.state.debt).toBe(null);
+    expect(engine.state.balances.p2).toBe(130000);
+    expect(engine.state.deeds[koti].houses).toBe(0);
+    engine.destroy();
+  });
+
+  test('the person may mortgage a property first and keep their buildings', async () => {
+    const { engine, koti, abids, uppal, say } = setup();
+    const paying = engine.collect('p1', 40000, 'p2', say, 'tax');
+    await new Promise((resolve) => setTimeout(resolve, 10));
+
+    expect(engine.manageProperty('p1', uppal, 'mortgage')).toBe(true);
+    await paying;
+
+    expect(engine.state.deeds[uppal].mortgaged).toBe(true);
+    expect(engine.state.deeds[koti].houses).toBe(1);
+    expect(engine.state.deeds[abids].houses).toBe(1);
+    expect(engine.state.balances.p2).toBe(140000);
+    engine.destroy();
+  });
+
+  test('when the clock runs out the rest is raised automatically', async () => {
+    const { engine, say } = setup(['human', 'human'], 60);
+    const paid = await engine.collect('p1', 30000, 'p2', say, 'rent');
+
+    expect(paid).toBe(30000);
+    expect(engine.state.debt).toBe(null);
+    expect(engine.state.bankrupt.p1).toBe(false);
+    engine.destroy();
+  });
+
+  test('declaring bankruptcy hands everything to the creditor', async () => {
+    const { engine, koti, say } = setup();
+    const paying = engine.collect('p1', 30000, 'p2', say, 'rent');
+    await new Promise((resolve) => setTimeout(resolve, 10));
+
+    expect(engine.giveUpDebt('p2')).toBe(false);
+    expect(engine.giveUpDebt('p1')).toBe(true);
+    expect(await paying).toBe(0);
+    expect(engine.state.bankrupt.p1).toBe(true);
+    expect(engine.state.deeds[koti]?.owner).toBe('p2');
+    engine.destroy();
+  });
+
+  test('computers and away players are settled at once without a prompt', async () => {
+    const { engine, say } = setup(['bot', 'human']);
+    expect(await engine.collect('p1', 30000, 'p2', say, 'rent')).toBe(30000);
+    expect(engine.state.debt).toBe(null);
+    engine.destroy();
+
+    const away = setup();
+    away.engine.setAway('p1', true);
+    expect(await away.engine.collect('p1', 30000, 'p2', away.say, 'rent')).toBe(30000);
+    expect(away.engine.state.debt).toBe(null);
+    away.engine.destroy();
+  });
+
+  test('a debt nothing could cover goes straight to bankruptcy', async () => {
+    const { engine, say } = setup();
+    const paid = await engine.collect('p1', 5000000, 'p2', say, 'rent');
+
+    expect(engine.state.debt).toBe(null);
+    expect(paid).toBeLessThan(5000000);
+    expect(engine.state.bankrupt.p1).toBe(true);
+    engine.destroy();
+  });
+
+  test('going away while choosing settles the debt automatically', async () => {
+    const { engine, say } = setup();
+    const paying = engine.collect('p1', 30000, 'p2', say, 'rent');
+    await new Promise((resolve) => setTimeout(resolve, 10));
+    engine.setAway('p1', true);
+
+    expect(await paying).toBe(30000);
+    expect(engine.state.debt).toBe(null);
     engine.destroy();
   });
 });
