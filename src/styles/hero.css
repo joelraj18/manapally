@@ -203,7 +203,7 @@
   display: grid;
   place-items: center;
   overflow: hidden;
-  background: #fbfcf8;
+  background: var(--surface);
   border-radius: clamp(3px, 0.6vw, 7px);
   box-shadow: 0 1px 1px rgba(60, 71, 46, 0.08);
 }

@@ -12,6 +12,16 @@
       name="description"
       content="Manapally is a premium South Indian strategy board game for 2 to 4 players, played in your browser"
     />
+    <script>
+      // Set the theme before anything paints, so a dark page never flashes light.
+      (function () {
+        try {
+          var saved = localStorage.getItem('manapally-theme');
+          var dark = saved ? saved === 'dark' : window.matchMedia('(prefers-color-scheme: dark)').matches;
+          document.documentElement.setAttribute('data-theme', dark ? 'dark' : 'light');
+        } catch (e) {}
+      })();
+    </script>
     <title>Manapally · Premium South Indian Strategy Board Game</title>
   </head>
   <body>

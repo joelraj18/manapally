@@ -2,6 +2,7 @@
 
 @import './styles/animations.css';
 @import './styles/components.css';
+@import './styles/dark.css';
 
 /* Design tokens
    The sage scale is sampled from the green iPhone finish: the frosted back

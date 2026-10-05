@@ -609,7 +609,7 @@
   gap: 4px;
   width: 250px;
   padding: 6px;
-  background: #ffffff;
+  background: var(--surface);
   border-radius: 16px;
   box-shadow: 0 18px 40px rgba(29, 35, 22, 0.18), 0 0 0 1px var(--hairline);
   animation: sheetUp 0.3s var(--ease-out);
@@ -653,7 +653,7 @@
 .premium-ai {
   margin-bottom: 22px;
   padding: 16px 18px;
-  background: linear-gradient(160deg, var(--sage-50), #ffffff);
+  background: linear-gradient(160deg, var(--sage-50), var(--surface));
   border: 1px solid var(--sage-200);
   border-radius: var(--radius-md);
 }

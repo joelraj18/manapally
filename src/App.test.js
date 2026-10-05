@@ -11,6 +11,6 @@ test('the home page renders the hero and the way into a room', () => {
 
   expect(screen.getByRole('heading', { level: 1, name: 'Manapally' })).toBeInTheDocument();
   expect(screen.getByText('Premium South Indian Strategy Board Game')).toBeInTheDocument();
-  expect(screen.getAllByRole('button', { name: /create a room/i }).length).toBeGreaterThan(0);
+  expect(screen.getAllByRole('button', { name: /start game/i }).length).toBeGreaterThan(0);
   expect(screen.getByRole('heading', { name: /district families/i })).toBeInTheDocument();
 });

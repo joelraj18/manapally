@@ -3,6 +3,7 @@ import ApiKeyInfo from '../../components/ApiKeyInfo';
 import BrandLogo from '../../components/BrandLogo';
 import ChatPanel from '../../components/ChatPanel';
 import GoldButton from '../../components/GoldButton';
+import ThemeToggle from '../../components/ThemeToggle';
 import {
   clearPremiumKey,
   hasPremiumKey,
@@ -163,9 +164,12 @@ export default function RoomWaiting({ session, onLeave }) {
           {session.status === 'offline' ? 'Offline table' : 'Private table online'}
         </div>
 
-        <button className="lobby-back" type="button" onClick={onLeave}>
-          Leave room
-        </button>
+        <div className="topbar-right">
+          <ThemeToggle />
+          <button className="lobby-back" type="button" onClick={onLeave}>
+            Leave room
+          </button>
+        </div>
       </header>
 
       <section className="waiting-room-layout">

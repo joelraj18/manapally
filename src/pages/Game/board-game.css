@@ -267,7 +267,7 @@
   padding: clamp(4px, 0.6vw, 8px);
   padding-top: clamp(9px, 1vw, 14px);
   overflow: hidden;
-  background: #fbfcf8;
+  background: var(--surface);
   border-radius: clamp(3px, 0.5vw, 7px);
   transition:
     transform 0.35s var(--ease),
@@ -527,7 +527,7 @@
   width: clamp(16px, 1.9vw, 26px);
   height: clamp(16px, 1.9vw, 26px);
   place-items: center;
-  background: #ffffff;
+  background: var(--surface);
   border-radius: 50%;
   box-shadow:
     0 0 0 1.5px currentColor,
@@ -743,7 +743,7 @@
   overflow: hidden;
   color: var(--ink);
   text-align: center;
-  background: linear-gradient(170deg, #ffffff, #f3f5ee);
+  background: linear-gradient(170deg, var(--surface), #f3f5ee);
   border-radius: 26px;
   box-shadow: 0 30px 70px rgba(20, 26, 14, 0.3);
   animation: cardReveal 0.6s var(--ease-out);
@@ -1470,7 +1470,7 @@
 }
 
 .space-owner--mortgaged {
-  background: repeating-linear-gradient(135deg, var(--seat) 0 4px, color-mix(in srgb, var(--seat) 70%, #ffffff) 4px 8px);
+  background: repeating-linear-gradient(135deg, var(--seat) 0 4px, color-mix(in srgb, var(--seat) 70%, var(--surface)) 4px 8px);
 }
 
 @keyframes ownerIn {
@@ -1931,7 +1931,7 @@
   margin-left: auto;
   padding: 0 3px;
   color: var(--seat);
-  background: #ffffff;
+  background: var(--surface);
   border-radius: 4px;
   font-size: inherit;
   font-weight: 800;
@@ -2024,7 +2024,7 @@
   width: 26px;
   height: 26px;
   place-items: center;
-  background: #ffffff;
+  background: var(--surface);
   border-radius: 50%;
 }
 
@@ -3078,7 +3078,7 @@
 }
 
 .board-space--property {
-  background: linear-gradient(180deg, color-mix(in srgb, var(--family) 13%, #ffffff), #ffffff 70%);
+  background: linear-gradient(180deg, color-mix(in srgb, var(--family) 13%, var(--surface)), var(--surface) 70%);
 }
 
 .board-space--property::before {
@@ -3178,9 +3178,38 @@
 }
 
 .board-centre-art h1 {
-  background: linear-gradient(120deg, #0b8a4f, #1f6fe0 55%, #7b4dff);
+  background: linear-gradient(100deg, #0b8a4f 0%, #19c477 30%, #7ddc9a 50%, #19c477 70%, #0b8a4f 100%);
+  background-size: 250% 100%;
   background-clip: text;
   -webkit-background-clip: text;
+  animation: titleShimmer 6s ease-in-out infinite;
+}
+
+/* Light runs across the green title, and the crest floats a few pixels */
+@keyframes titleShimmer {
+  0%,
+  100% {
+    background-position: 100% 0;
+  }
+
+  50% {
+    background-position: 0% 0;
+  }
+}
+
+.centre-crown {
+  animation: crestFloat 5s ease-in-out infinite;
+}
+
+@keyframes crestFloat {
+  0%,
+  100% {
+    transform: translateY(0);
+  }
+
+  50% {
+    transform: translateY(-5px);
+  }
 }
 
 /* ------------------------------------------------------------------ */
@@ -3330,7 +3359,7 @@
 
 /* The active player's card fills its border in the seat colour */
 .game-player--active {
-  background: color-mix(in srgb, var(--seat) 7%, #ffffff);
+  background: color-mix(in srgb, var(--seat) 7%, var(--surface));
   box-shadow: inset 0 0 0 1.5px color-mix(in srgb, var(--seat) 70%, transparent);
   animation: activeIn 0.6s var(--ease-out);
 }
@@ -3377,7 +3406,9 @@
   .space-owner::after,
   .space-builds,
   .game-player--active,
-  .board-centre-art::after {
+  .board-centre-art::after,
+  .board-centre-art h1,
+  .centre-crown {
     animation: none;
   }
 }
