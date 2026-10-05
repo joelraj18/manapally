@@ -105,6 +105,13 @@ export default function Game() {
       setCurrentView('board');
     });
 
+    // The host may start the match in the same moment a friend joins, so the
+    // start can arrive before this view is listening. The session keeps it.
+    if (session.started && session.startConfig) {
+      setMatch((current) => current || session.startConfig);
+      setCurrentView('board');
+    }
+
     const offClosed = session.on('closed', (reason) => {
       setSession(null);
       setMatch(null);

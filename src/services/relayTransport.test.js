@@ -4,8 +4,8 @@
 const { webcrypto } = require('crypto');
 
 // The noble libraries read crypto when they load, so the globals come first.
-if (!globalThis.crypto?.subtle) {
-  globalThis.crypto = webcrypto;
+if (!global.crypto?.subtle) {
+  global.crypto = webcrypto;
 }
 
 global.window = { addEventListener() {}, removeEventListener() {}, location: { search: '' } };
@@ -14,8 +14,9 @@ const { guestWithRelay, hostWithRelay, openRelayPool, seal, unseal } = require('
 
 // An in memory stand in for a set of Nostr relays: REQ subscribes by kind and
 // #t tag, EVENT fans out to every matching subscription on that relay.
-const makeHub = () => {
+const makeHub = ({ limited = {} } = {}) => {
   const relays = new Map();
+  const accepted = {};
   let published = 0;
 
   class FakeSocket {
@@ -38,6 +39,11 @@ const makeHub = () => {
       } else if (message[0] === 'EVENT') {
         published += 1;
         const event = message[1];
+        accepted[this.url] = (accepted[this.url] || 0) + 1;
+        if (limited[this.url] !== undefined && accepted[this.url] > limited[this.url]) {
+          setTimeout(() => this.onmessage?.({ data: JSON.stringify(['OK', event.id, false, 'rate-limited: slow down']) }), 1);
+          return;
+        }
         relays.get(this.url).forEach((socket) =>
           socket.subs.forEach((filter, id) => {
             if (filter.kinds.includes(event.kind) && event.tags.some((tag) => filter['#t'].includes(tag[1]))) {
@@ -54,7 +60,7 @@ const makeHub = () => {
     }
   }
 
-  return { FakeSocket, published: () => published };
+  return { FakeSocket, published: () => published, accepted };
 };
 
 const wait = (ms) => new Promise((resolve) => setTimeout(resolve, ms));
@@ -69,9 +75,8 @@ describe('relay transport', () => {
     const sealed = await seal(key, large);
     expect(await unseal(key, sealed)).toEqual(large);
     // Browsers deflate large envelopes; the Jest sandbox has no CompressionStream.
-    if (typeof CompressionStream === 'function' && typeof Response === 'function') {
-      expect(sealed.length).toBeLessThan(JSON.stringify(large).length / 3);
-    }
+    const compresses = typeof CompressionStream === 'function' && typeof Response === 'function';
+    expect(!compresses || sealed.length < JSON.stringify(large).length / 3).toBe(true);
   });
 
   test('a sealed envelope cannot be read with another room key', async () => {
@@ -82,7 +87,7 @@ describe('relay transport', () => {
 
   test('a guest joins a host, messages flow both ways and duplicates across relays are dropped', async () => {
     const { FakeSocket } = makeHub();
-    const options = { urls: ['wss://one', 'wss://two'], Socket: FakeSocket };
+    const options = { urls: ['wss://one', 'wss://two'], Socket: FakeSocket, tickCalm: 20, tickBusy: 60 };
     const hostEvents = [];
     const guestEvents = [];
 
@@ -116,7 +121,7 @@ describe('relay transport', () => {
 
   test('another room code never sees the traffic', async () => {
     const { FakeSocket } = makeHub();
-    const options = { urls: ['wss://one'], Socket: FakeSocket };
+    const options = { urls: ['wss://one'], Socket: FakeSocket, tickCalm: 20, tickBusy: 60 };
     const host = hostWithRelay('ABC234', {}, options);
     await host.ready;
     const stray = guestWithRelay('XYZ987', {}, options);
@@ -134,7 +139,7 @@ describe('relay transport', () => {
 
   test('game snapshots are coalesced to the newest one', async () => {
     const { FakeSocket } = makeHub();
-    const options = { urls: ['wss://one'], Socket: FakeSocket };
+    const options = { urls: ['wss://one'], Socket: FakeSocket, tickCalm: 20, tickBusy: 60 };
     const host = hostWithRelay('ABC234', {}, options);
     await host.ready;
     const received = [];
@@ -153,16 +158,99 @@ describe('relay transport', () => {
     host.close();
   });
 
+  test('a rate limited relay is rested and the other relay carries the room', async () => {
+    const { FakeSocket, accepted } = makeHub({ limited: { 'wss://strict': 3 } });
+    const options = { urls: ['wss://strict', 'wss://open'], Socket: FakeSocket, tickCalm: 20, tickBusy: 60 };
+    const host = hostWithRelay('ABC234', {}, options);
+    await host.ready;
+    const received = [];
+    const guest = guestWithRelay('ABC234', { onMessage: (_, message) => received.push(message) }, options);
+    await guest.ready;
+
+    for (let index = 1; index <= 12; index += 1) {
+      host.broadcast({ t: 'chat', message: { text: `line ${index}` } });
+      await wait(90);
+    }
+    await wait(200);
+
+    expect(received.map((message) => message.message.text)).toEqual(Array.from({ length: 12 }, (_, i) => `line ${i + 1}`));
+    // Once refused, the strict relay is skipped instead of hammered.
+    expect(accepted['wss://strict']).toBeLessThan(accepted['wss://open']);
+    guest.close();
+    host.close();
+  });
+
+  test('a message every relay refused is sent again and still arrives', async () => {
+    const limits = { 'wss://only': 4 };
+    const { FakeSocket } = makeHub({ limited: limits });
+    const options = { urls: ['wss://only'], Socket: FakeSocket, tickCalm: 20, tickBusy: 40, restFor: 100 };
+    const host = hostWithRelay('ABC234', {}, options);
+    await host.ready;
+    const received = [];
+    const guest = guestWithRelay('ABC234', { onMessage: (_, message) => received.push(message) }, options);
+    await guest.ready;
+
+    // The relay now refuses everything, so the message waits for a retry.
+    host.broadcast({ t: 'chat', text: 'important' });
+    await wait(150);
+    expect(received).toEqual([]);
+
+    // Once the relay accepts again, the retry gets it through.
+    limits['wss://only'] = Infinity;
+    await wait(1500);
+    expect(received).toEqual([{ t: 'chat', text: 'important' }]);
+    guest.close();
+    host.close();
+  });
+
+  test('many messages in one tick travel as one event', async () => {
+    const { FakeSocket, published } = makeHub();
+    const options = { urls: ['wss://one'], Socket: FakeSocket, tickCalm: 50, tickBusy: 100 };
+    const host = hostWithRelay('ABC234', {}, options);
+    await host.ready;
+    const received = [];
+    const guest = guestWithRelay('ABC234', { onMessage: (_, message) => received.push(message) }, options);
+    await guest.ready;
+    await wait(120);
+
+    const before = published();
+    for (let index = 0; index < 20; index += 1) host.broadcast({ t: 'chat', index });
+    await wait(150);
+
+    expect(received.filter((message) => message.t === 'chat')).toHaveLength(20);
+    expect(published() - before).toBeLessThanOrEqual(2);
+    guest.close();
+    host.close();
+  });
+
+  test('a batch too large for one event is split and arrives in order', async () => {
+    const { FakeSocket } = makeHub();
+    const options = { urls: ['wss://one'], Socket: FakeSocket, tickCalm: 30, tickBusy: 60 };
+    const host = hostWithRelay('ABC234', {}, options);
+    await host.ready;
+    const received = [];
+    const guest = guestWithRelay('ABC234', { onMessage: (_, message) => received.push(message) }, options);
+    await guest.ready;
+
+    const bulky = 'x'.repeat(15000);
+    for (let index = 0; index < 6; index += 1) host.broadcast({ t: 'chat', index, bulky });
+    await wait(300);
+
+    expect(received.map((message) => message.index)).toEqual([0, 1, 2, 3, 4, 5]);
+    guest.close();
+    host.close();
+  });
+
   test('joins and messages from an earlier host session are ignored', async () => {
     const { FakeSocket } = makeHub();
-    const options = { urls: ['wss://one'], Socket: FakeSocket };
+    const options = { urls: ['wss://one'], Socket: FakeSocket, tickCalm: 20, tickBusy: 60 };
     const opened = [];
     const host = hostWithRelay('ABC234', { onPeerOpen: (id) => opened.push(id) }, options);
     await host.ready;
     const stale = openRelayPool('ABC234', () => {}, options);
     await stale.ready;
-    stale.publish({ from: 'rold', to: 'host', hs: 'rprevious', kind: 'join' });
-    stale.publish({ from: 'rold', to: 'host', hs: 'rprevious', kind: 'msg', payload: { t: 'hello' } });
+    stale.publish({ from: 'rold', hs: 'rprevious', items: [{ to: 'host', kind: 'join', hs: 'rprevious' }] });
+    stale.publish({ from: 'rold', hs: 'rprevious', items: [{ to: 'host', kind: 'msg', payload: { t: 'hello' } }] });
     await wait(60);
     expect(opened).toEqual([]);
     stale.close();

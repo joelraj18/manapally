@@ -663,6 +663,53 @@
   line-height: 1.45;
 }
 
+.relay-list {
+  margin-top: 10px;
+  font-size: 0.8rem;
+}
+
+.relay-list summary {
+  color: var(--sage-700);
+  font-weight: 600;
+  cursor: pointer;
+}
+
+.relay-list ul {
+  display: grid;
+  gap: 4px;
+  margin: 8px 0 0;
+  padding: 0;
+  list-style: none;
+}
+
+.relay-list li {
+  display: flex;
+  gap: 8px;
+  color: var(--ink-secondary);
+}
+
+.relay-list li::before {
+  width: 7px;
+  height: 7px;
+  margin-top: 6px;
+  flex: none;
+  border-radius: 50%;
+  content: '';
+}
+
+.relay-list li.check-ok::before {
+  background: #1f9d55;
+}
+
+.relay-list li.check-blocked::before {
+  background: #d93838;
+}
+
+.relay-list li em {
+  margin-left: auto;
+  font-style: normal;
+}
+
 .join-tips {
   display: grid;
   gap: 6px;

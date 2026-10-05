@@ -45,6 +45,7 @@ const ROUTE_MODES = [
 const CHECK_ROWS = [
   { id: 'service', label: 'Room service' },
   { id: 'direct', label: 'Direct link' },
+  { id: 'turn', label: 'Direct through a TURN server' },
   { id: 'relay', label: 'Relay' },
 ];
 
@@ -379,6 +380,21 @@ export default function Lobby({ onBack, onSession, initialPiece = 'lamp', initia
                   ))}
                 </ul>
                 <p>{check.verdict}</p>
+                {check.relays?.length > 0 && (
+                  <details className="relay-list">
+                    <summary>
+                      Relay servers, {check.relays.filter((entry) => entry.ok).length} of {check.relays.length} answered
+                    </summary>
+                    <ul>
+                      {check.relays.map((entry, index) => (
+                        <li key={entry.host} className={entry.ok ? 'check-ok' : 'check-blocked'}>
+                          Relay {index + 1}
+                          <em>{entry.ok ? `${entry.ms} ms` : entry.reason}</em>
+                        </li>
+                      ))}
+                    </ul>
+                  </details>
+                )}
               </div>
             )}
 

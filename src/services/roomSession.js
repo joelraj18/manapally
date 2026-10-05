@@ -16,6 +16,11 @@ const SEAT_KEY = 'manapally-seat';
 const HOST_GAME_KEY = 'manapally-host-game';
 const RECONNECT_EVERY = 3000;
 const RECONNECT_FOR = 120000;
+// During a match both sides say they are alive every BEAT_EVERY. A link that
+// stays quiet for BEAT_SILENT is treated as dropped even when the network
+// never reported it, which happens when a phone locks or loses signal.
+const BEAT_EVERY = 10000;
+const BEAT_SILENT = 40000;
 
 // Small, non secret notes kept on this device so a dropped player can find
 // their way back: the room code and their Player ID, and for the host a
@@ -80,6 +85,9 @@ export default class RoomSession {
     this.myCode = null;
     this.connection = 'online'; // 'online' | 'reconnecting'
     this.routes = { direct: 'trying', relay: 'trying' };
+    this.heardFrom = new Map(); // host: peerId -> last message time
+    this.hostHeardAt = 0; // guest: last message from the host
+    this.beatTimer = null;
     this.route = null; // the route a guest joined by: 'direct' | 'relay' | 'local'
   }
 
@@ -304,8 +312,12 @@ export default class RoomSession {
     }
 
     const seat = this.lobby.seats.find((entry) => entry.clientId === peerId);
+    this.heardFrom.set(peerId, Date.now());
 
     switch (message.t) {
+      case 'beat':
+        break;
+
       case 'hello': {
         if (seat) {
           return;
@@ -509,6 +521,41 @@ export default class RoomSession {
     writeStore(SEAT_KEY, { code: this.code, playerCode: this.players[0].code, name: this.players[0].name });
     this.broadcast({ t: 'start', players: this.players, gameId: this.gameId });
     this.emit('start', { players: this.players, myPlayerId: 'p1', gameId: this.gameId, resume });
+    this.startBeat();
+  }
+
+  // Keeps every link honest during a match. The host drops a guest that went
+  // quiet, so the computer plays their seat and they rejoin when they can; a
+  // guest whose host went quiet starts its reconnect loop.
+  startBeat() {
+    clearInterval(this.beatTimer);
+    const startedAt = Date.now();
+
+    this.beatTimer = setInterval(() => {
+      if (this.status === 'closed') {
+        clearInterval(this.beatTimer);
+        return;
+      }
+
+      const cutoff = Date.now() - BEAT_SILENT;
+
+      if (this.isHost) {
+        this.broadcast({ t: 'beat' });
+        this.lobby.seats.forEach((seat) => {
+          const id = seat.clientId;
+          if (!id || id === 'host' || seat.kind !== 'human') return;
+          if (Math.max(this.heardFrom.get(id) || 0, startedAt) < cutoff) {
+            this.transport?.kick(id);
+            this.handleGuestLeft(id);
+          }
+        });
+      } else if (this.connection === 'online') {
+        this.transport?.send({ t: 'beat' });
+        if (Math.max(this.hostHeardAt, startedAt) < cutoff) {
+          this.handleHostLost();
+        }
+      }
+    }, BEAT_EVERY);
   }
 
   // The host reloaded or lost their tab: reopen the same room from the
@@ -636,7 +683,12 @@ export default class RoomSession {
       return;
     }
 
+    this.hostHeardAt = Date.now();
+
     switch (message.t) {
+      case 'beat':
+        break;
+
       case 'welcome':
         this.myClientId = message.clientId;
 
@@ -693,6 +745,7 @@ export default class RoomSession {
         }
 
         this.emit('start', { players: message.players, myPlayerId: this.myPlayerId, gameId: message.gameId });
+        if (!this.beatTimer) this.startBeat();
         break;
       }
 
@@ -740,6 +793,7 @@ export default class RoomSession {
     }
 
     this.status = 'closed';
+    clearInterval(this.beatTimer);
     this.transport?.close();
     this.emit('closed', reason);
   }
@@ -755,6 +809,7 @@ export default class RoomSession {
     }
 
     this.status = 'closed';
+    clearInterval(this.beatTimer);
     // Give the goodbye a moment to leave before tearing the channel down.
     const transport = this.transport;
     setTimeout(() => transport?.close(), 150);
