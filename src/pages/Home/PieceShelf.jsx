@@ -20,8 +20,48 @@ const pieceStories = {
   },
   bell: {
     title: 'Ghanta',
-    seat: 'Indigo seat',
+    seat: 'Royal blue seat',
     story: 'The temple bell, quick and alert, for players who read the room',
+  },
+  tiger: {
+    title: 'Puli',
+    seat: 'Gold seat',
+    story: 'The tiger of the Nallamala forest, fierce and fearless at every auction',
+  },
+  coconut: {
+    title: 'Kobbari',
+    seat: 'Brown seat',
+    story: 'Tough outside and sweet inside, for players who hold firm and pay off late',
+  },
+  gun: {
+    title: 'Tupaki',
+    seat: 'Black seat',
+    story: 'Quick on the draw, for players who strike the moment a deal appears',
+  },
+  dumbbell: {
+    title: 'Dumbbell',
+    seat: 'Steel seat',
+    story: 'Built for strength, for players who grow their estate one rep at a time',
+  },
+  bat: {
+    title: 'Cricket Bat',
+    seat: 'Cyan seat',
+    story: 'Every roll a fresh delivery, for players who play their shots with flair',
+  },
+  auto: {
+    title: 'Auto',
+    seat: 'Lime seat',
+    story: 'Nimble through every lane, for players who know every shortcut in town',
+  },
+  clapper: {
+    title: 'Clapper',
+    seat: 'Magenta seat',
+    story: 'Lights, camera, action, for players who love a big Tollywood finish',
+  },
+  crown: {
+    title: 'Kireetam',
+    seat: 'Violet seat',
+    story: 'The crown of the court, for players who mean to rule the board',
   },
 };
 

@@ -23,9 +23,30 @@ const seatRole = (seat, session) => {
   return 'Friend';
 };
 
+// The invite link carries the room code, and the test switches when present.
+const inviteLink = (code) => {
+  const url = new URL(window.location.href);
+  const keep = ['net', 'relay', 'speed'];
+  [...url.searchParams.keys()].forEach((key) => !keep.includes(key) && url.searchParams.delete(key));
+  url.searchParams.set('join', code);
+  url.hash = '';
+  return url.toString();
+};
+
+const routeSummary = (routes) => {
+  const open = ['direct', 'relay'].filter((route) => routes[route] === 'up');
+
+  if (open.length === 2) return 'Open for friends directly and through Relay';
+  if (open[0] === 'relay') return 'Open for friends through Relay, this network blocks direct links';
+  if (open[0] === 'direct') return 'Open for friends directly';
+  return 'Opening the room';
+};
+
 export default function RoomWaiting({ session, onLeave }) {
   const [lobby, setLobby] = useState(session.lobby);
+  const [routes, setRoutes] = useState(session.routes);
   const [copyState, setCopyState] = useState('idle');
+  const [linkState, setLinkState] = useState('idle');
   const [hasKey, setHasKey] = useState(hasPremiumKey());
   const [hasDraft, setHasDraft] = useState(false);
   const [keyStatus, setKeyStatus] = useState(hasPremiumKey() ? 'valid' : 'idle');
@@ -35,6 +56,7 @@ export default function RoomWaiting({ session, onLeave }) {
   const isHost = session.isHost;
 
   useEffect(() => session.on('lobby', (next) => setLobby({ ...next, seats: [...next.seats] })), [session]);
+  useEffect(() => session.on('routes', (next) => setRoutes({ ...next })), [session]);
   useEffect(() => onPremiumKeyChange(setHasKey), []);
 
   // The add opponent menu closes on Escape or a click anywhere else.
@@ -71,6 +93,28 @@ export default function RoomWaiting({ session, onLeave }) {
     }
 
     window.setTimeout(() => setCopyState('idle'), 2200);
+  };
+
+  const shareInvite = async () => {
+    const link = inviteLink(session.code);
+
+    if (navigator.share) {
+      try {
+        await navigator.share({ title: 'Manapally', text: `Join my Manapally table, room code ${session.code}`, url: link });
+        return;
+      } catch (error) {
+        if (error?.name === 'AbortError') return;
+      }
+    }
+
+    try {
+      await navigator.clipboard.writeText(link);
+      setLinkState('copied');
+    } catch {
+      setLinkState('blocked');
+    }
+
+    window.setTimeout(() => setLinkState('idle'), 2600);
   };
 
   const addOpponent = (kind) => {
@@ -136,22 +180,45 @@ export default function RoomWaiting({ session, onLeave }) {
 
           <p>
             {isHost
-              ? 'Share the room code with your friends, they join from the lobby with Join room and appear here as they arrive'
+              ? 'Share the invite link or the room code with your friends, they appear here as they arrive'
               : 'You are seated, the host starts the game once the table is ready'}
           </p>
 
           <div className="invite-code-card">
             <span>Room code</span>
             <strong>{session.code}</strong>
-            <button type="button" onClick={copyRoomCode} aria-live="polite">
-              {copyState === 'copied' ? 'Copied' : copyState === 'blocked' ? 'Copy blocked, share the code above' : 'Copy room code'}
-            </button>
+            <div className="invite-actions">
+              <button type="button" onClick={copyRoomCode} aria-live="polite">
+                {copyState === 'copied' ? 'Copied' : copyState === 'blocked' ? 'Copy blocked, share the code above' : 'Copy room code'}
+              </button>
+              {isHost && (
+                <button type="button" className="invite-link-button" onClick={shareInvite} aria-live="polite">
+                  {linkState === 'copied' ? 'Invite link copied' : linkState === 'blocked' ? 'Copy blocked' : 'Share invite link'}
+                </button>
+              )}
+            </div>
           </div>
+
+          {isHost && session.status !== 'offline' && (
+            <div className="route-status" role="status">
+              <span className={`route-pill ${routes.direct === 'up' ? 'route-pill--up' : routes.direct === 'trying' ? '' : 'route-pill--down'}`}>
+                Direct
+              </span>
+              <span className={`route-pill ${routes.relay === 'up' ? 'route-pill--up' : routes.relay === 'trying' ? '' : 'route-pill--down'}`}>
+                Relay
+              </span>
+              <p>{routeSummary(routes)}, on a phone keep this tab open while friends join</p>
+            </div>
+          )}
+
+          {!isHost && session.route === 'relay' && (
+            <p className="route-note">You joined through Relay, a secure route for networks that block direct links</p>
+          )}
 
           {session.status === 'offline' && (
             <p className="offline-note">
-              The room service could not be reached, so friends cannot join right now, you can still play
-              with computer and AI opponents
+              This network blocks every game route, so friends cannot join right now, you can still play with
+              computer and AI opponents, or switch to mobile data and create a new room
             </p>
           )}
 
@@ -211,6 +278,7 @@ export default function RoomWaiting({ session, onLeave }) {
                     </strong>
                     <span>
                       {seatRole(seat, session)} · {piece.label}
+                      {isHost && seat.route === 'relay' && <em className="relay-chip">Relay</em>}
                     </span>
                   </div>
 
@@ -253,7 +321,7 @@ export default function RoomWaiting({ session, onLeave }) {
                         <i />
                       </span>
                     </strong>
-                    <span>Seat 0{seatNumber} · share the room code to fill it</span>
+                    <span>Seat 0{seatNumber} · share the invite link to fill it</span>
                   </div>
 
                   {isHost && (

@@ -3040,3 +3040,344 @@
     transform: rotate(90deg);
   }
 }
+
+/* ------------------------------------------------------------------ */
+/* Vibrant palette                                                    */
+/* ------------------------------------------------------------------ */
+
+.board-space--maroon {
+  --family: var(--color-maroon);
+}
+
+.board-space--peacock {
+  --family: var(--color-peacock);
+}
+
+.board-space--rose {
+  --family: var(--color-rose);
+}
+
+.board-space--saffron {
+  --family: var(--color-saffron);
+}
+
+.board-space--kumkum {
+  --family: var(--color-kumkum);
+}
+
+.board-space--turmeric {
+  --family: var(--color-turmeric);
+}
+
+.board-space--emerald {
+  --family: var(--color-emerald);
+}
+
+.board-space--indigo {
+  --family: var(--color-indigo);
+}
+
+.board-space--property {
+  background: linear-gradient(180deg, color-mix(in srgb, var(--family) 13%, #ffffff), #ffffff 70%);
+}
+
+.board-space--property::before {
+  height: clamp(5px, 0.7vw, 9px);
+  background: var(--family);
+}
+
+.game-board {
+  background: linear-gradient(135deg, #cdeedd, #d6e4fb 55%, #e6dcfb);
+}
+
+.board-space--start {
+  background: linear-gradient(145deg, #19c477, #0b8a4f);
+}
+
+.board-space--chance {
+  background: linear-gradient(180deg, #ffe1ec, #fff6f9);
+}
+
+.board-space--community {
+  background: linear-gradient(180deg, #ffeccc, #fffaf1);
+}
+
+.board-space--tax {
+  background: linear-gradient(180deg, #ece6ff, #faf8ff);
+}
+
+.board-space--route {
+  background: linear-gradient(180deg, #d9f1fb, #f6fcff);
+}
+
+.board-space--route::before {
+  background: #0b7fa8;
+}
+
+.board-space--utility {
+  background: linear-gradient(180deg, #fff1c7, #fffbef);
+}
+
+.board-space--utility::before {
+  background: #e09b00;
+}
+
+.board-space--detention,
+.board-space--parking {
+  background: linear-gradient(145deg, #e3f8ec, #c3ecd4);
+}
+
+.board-space--go-to-detention {
+  background: linear-gradient(145deg, #ffe3d9, #ffc0a8);
+}
+
+.board-space--chance .space-art {
+  --tile-accent: #ff3d8b;
+  color: #b0124f;
+}
+
+.board-space--community .space-art {
+  --tile-accent: #ffa31a;
+  color: #b35a00;
+}
+
+.board-space--route .space-art {
+  --tile-accent: #4cc3ef;
+  color: #0b6688;
+}
+
+.board-space--utility .space-art {
+  --tile-accent: #ffc400;
+  color: #b37700;
+}
+
+.board-space--tax .space-art {
+  --tile-accent: #a58bff;
+  color: #5a35d6;
+}
+
+.board-space--go-to-detention .space-art {
+  --tile-accent: #ff6b3d;
+  color: #b8350f;
+}
+
+.board-space--detention .space-art,
+.board-space--parking .space-art {
+  --tile-accent: #3fd18a;
+  color: #137a46;
+}
+
+.board-space--tax .space-cost--tax {
+  color: #5a35d6;
+}
+
+.board-centre-art {
+  background:
+    radial-gradient(70% 55% at 50% 0%, rgba(255, 255, 255, 0.95), transparent),
+    linear-gradient(160deg, #f4fbf7, #e8f1fb 55%, #f6effd);
+}
+
+.board-centre-art h1 {
+  background: linear-gradient(120deg, #0b8a4f, #1f6fe0 55%, #7b4dff);
+  background-clip: text;
+  -webkit-background-clip: text;
+}
+
+/* ------------------------------------------------------------------ */
+/* Motion: short, eased and quiet, purely decorative                  */
+/* ------------------------------------------------------------------ */
+
+/* Each step lands with a low arc and a soft shadow */
+.board-token {
+  animation: tokenHop 0.34s cubic-bezier(0.3, 0.7, 0.4, 1);
+}
+
+@keyframes tokenHop {
+  0% {
+    opacity: 0.4;
+    transform: translateY(-55%) scale(0.92);
+    box-shadow:
+      0 0 0 1.5px currentColor,
+      0 10px 12px rgba(29, 35, 22, 0.12);
+  }
+
+  70% {
+    opacity: 1;
+    transform: translateY(4%) scale(1.03, 0.97);
+  }
+
+  100% {
+    transform: none;
+  }
+}
+
+/* The token whose player is about to roll glows faintly */
+.board-token--waiting {
+  animation:
+    tokenHop 0.34s cubic-bezier(0.3, 0.7, 0.4, 1),
+    tokenWait 2.4s 0.34s var(--ease) infinite;
+}
+
+@keyframes tokenWait {
+  0%,
+  100% {
+    box-shadow:
+      0 0 0 1.5px currentColor,
+      0 0 0 0 color-mix(in srgb, currentColor 35%, transparent),
+      0 3px 6px rgba(29, 35, 22, 0.25);
+  }
+
+  50% {
+    box-shadow:
+      0 0 0 1.5px currentColor,
+      0 0 0 6px color-mix(in srgb, currentColor 0%, transparent),
+      0 3px 6px rgba(29, 35, 22, 0.25);
+  }
+}
+
+/* Dice tumble, then ease to rest */
+.dice-display--rolling .die-face {
+  animation: diceRoll 0.42s cubic-bezier(0.45, 0.05, 0.55, 0.95) infinite;
+}
+
+@keyframes diceRoll {
+  0% {
+    transform: translateY(0) rotate(0deg);
+  }
+
+  50% {
+    transform: translateY(-8px) rotate(180deg) scale(0.94);
+  }
+
+  100% {
+    transform: translateY(0) rotate(360deg);
+  }
+}
+
+.dice-display:not(.dice-display--rolling) .die-face:not(.die-face--idle) {
+  animation: diceRest 0.5s var(--ease-spring);
+}
+
+@keyframes diceRest {
+  0% {
+    transform: rotate(-14deg) scale(0.92);
+  }
+}
+
+/* Passing Go: one gold light sweeps across the tile */
+.board-space--start::after {
+  position: absolute;
+  inset: 0;
+  background: linear-gradient(110deg, transparent 30%, rgba(255, 236, 160, 0.85) 50%, transparent 70%);
+  content: '';
+  opacity: 0;
+  pointer-events: none;
+  transform: translateX(-100%);
+}
+
+.board-space--go-flash::after {
+  animation: goSweep 1.2s var(--ease-out);
+}
+
+@keyframes goSweep {
+  0% {
+    opacity: 1;
+    transform: translateX(-100%);
+  }
+
+  100% {
+    opacity: 1;
+    transform: translateX(100%);
+  }
+}
+
+/* A new owner: the badge scales in with one soft ring in the seat colour */
+.space-owner {
+  position: relative;
+}
+
+.space-owner::after {
+  position: absolute;
+  inset: -2px;
+  border-radius: inherit;
+  box-shadow: 0 0 0 0 color-mix(in srgb, var(--seat) 55%, transparent);
+  content: '';
+  animation: ownerRing 0.9s 0.15s var(--ease-out) backwards;
+  pointer-events: none;
+}
+
+@keyframes ownerRing {
+  from {
+    box-shadow: 0 0 0 0 color-mix(in srgb, var(--seat) 55%, transparent);
+  }
+
+  to {
+    box-shadow: 0 0 0 8px color-mix(in srgb, var(--seat) 0%, transparent);
+  }
+}
+
+/* Houses and hotels rise into place */
+.space-builds {
+  animation: buildRise 0.45s var(--ease-out);
+}
+
+@keyframes buildRise {
+  from {
+    opacity: 0;
+    transform: translateY(5px);
+  }
+}
+
+/* The active player's card fills its border in the seat colour */
+.game-player--active {
+  background: color-mix(in srgb, var(--seat) 7%, #ffffff);
+  box-shadow: inset 0 0 0 1.5px color-mix(in srgb, var(--seat) 70%, transparent);
+  animation: activeIn 0.6s var(--ease-out);
+}
+
+@keyframes activeIn {
+  from {
+    box-shadow: 0 0 0 0 color-mix(in srgb, var(--seat) 0%, transparent);
+  }
+}
+
+/* A slow, faint light passes over the board centre */
+.board-centre-art::after {
+  position: absolute;
+  inset: 0;
+  background: linear-gradient(115deg, transparent 35%, rgba(255, 255, 255, 0.55) 50%, transparent 65%);
+  content: '';
+  pointer-events: none;
+  transform: translateX(-120%);
+  animation: centreSheen 9s 2s var(--ease) infinite;
+}
+
+@keyframes centreSheen {
+  0% {
+    transform: translateX(-120%);
+  }
+
+  25%,
+  100% {
+    transform: translateX(120%);
+  }
+}
+
+/* Plain tiles lift slightly under the pointer */
+.board-space:not(.board-space--clickable):hover {
+  transform: translateY(-1px);
+}
+
+@media (prefers-reduced-motion: reduce) {
+  .board-token,
+  .board-token--waiting,
+  .dice-display--rolling .die-face,
+  .dice-display .die-face,
+  .board-space--go-flash::after,
+  .space-owner::after,
+  .space-builds,
+  .game-player--active,
+  .board-centre-art::after {
+    animation: none;
+  }
+}

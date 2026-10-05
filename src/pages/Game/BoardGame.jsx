@@ -164,6 +164,9 @@ export default function BoardGame({
   const [tradeChoices, setTradeChoices] = useState({}); // mortgage choices on an incoming offer
   const [hiddenTrades, setHiddenTrades] = useState([]); // incoming offers put aside for later
   const [showResults, setShowResults] = useState(true);
+  const [goFlash, setGoFlash] = useState(false);
+  const lastPositions = useRef(null);
+  const goFlashTimer = useRef(null);
   const engineRef = useRef(null);
 
   // ------------------------------------------------------------- engine
@@ -443,6 +446,27 @@ export default function BoardGame({
   // ------------------------------------------------------------ derived
 
   const players = state.players;
+  // A token that wraps from the top row back past Go lights the Go tile up
+  // for a moment. Going to Jail also moves a token back, so Jail is skipped.
+  useEffect(() => {
+    const before = lastPositions.current;
+    lastPositions.current = state.positions;
+
+    const passed =
+      before &&
+      Object.keys(state.positions).some(
+        (id) => before[id] >= 28 && state.positions[id] <= 11 && state.positions[id] !== 10,
+      );
+
+    if (passed) {
+      setGoFlash(true);
+      clearTimeout(goFlashTimer.current);
+      goFlashTimer.current = setTimeout(() => setGoFlash(false), 1400);
+    }
+  }, [state.positions]);
+
+  useEffect(() => () => clearTimeout(goFlashTimer.current), []);
+
   const activePlayer = players[state.activeIndex];
   const me = players.find((player) => player.id === myPlayerId);
   const amAlive = me && !state.bankrupt[me.id];
@@ -1576,7 +1600,9 @@ export default function BoardGame({
                 <article
                   className={`board-space ${getSpaceClass(space)} ${isClickable ? 'board-space--clickable' : ''} ${
                     selectedProperty === space.id ? 'board-space--selected' : ''
-                  } ${owner ? 'board-space--owned' : ''} ${space.art ? 'board-space--art' : ''}`}
+                  } ${owner ? 'board-space--owned' : ''} ${space.art ? 'board-space--art' : ''} ${
+                    goFlash && space.id === 0 ? 'board-space--go-flash' : ''
+                  }`}
                   key={space.id}
                   style={{ gridColumn: column, gridRow: row }}
                   onClick={() => isClickable && setSelectedProperty(space.id)}
@@ -1640,7 +1666,14 @@ export default function BoardGame({
                   {tokens.length > 0 && (
                     <div className="space-tokens">
                       {tokens.map((player) => (
-                        <span className={`board-token seat-${player.pieceKey}`} key={player.id}>
+                        <span
+                          className={`board-token seat-${player.pieceKey} ${
+                            player.id === activePlayer?.id && state.turnPhase === 'pre-roll' && !state.busy && !state.gameOver
+                              ? 'board-token--waiting'
+                              : ''
+                          }`}
+                          key={player.id}
+                        >
                           <PieceMark piece={player.pieceKey} variant="token" title={player.name} />
                         </span>
                       ))}

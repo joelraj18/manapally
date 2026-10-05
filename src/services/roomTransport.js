@@ -4,6 +4,11 @@
 // free public PeerJS signalling server, so a static site on GitHub Pages needs
 // no backend of its own. Game traffic flows directly between players.
 //
+// `relay` (services/relayTransport.js) carries messages through public relays
+// over secure websockets on port 443, for networks that block WebRTC or the
+// PeerJS server. A host listens on both at once; a guest tries Direct first
+// and moves to Relay when Direct is blocked or slow. ?net=relay forces it.
+//
 // `local` uses a BroadcastChannel, which links tabs of the same browser. It
 // powers automated tests and works offline. Add ?net=local to the URL to use it.
 //
@@ -14,15 +19,65 @@
 // onClose() and onError(code).
 
 import Peer from 'peerjs';
+import { guestWithRelay, hostWithRelay } from './relayTransport';
 
 const ID_PREFIX = 'manapally-room-';
 const CONNECT_TIMEOUT = 15000;
+const DIRECT_GRACE = 7000;
+const ROUTE_KEY = 'manapally-route';
 
 export const transportKind = () => {
   try {
-    return new URLSearchParams(window.location.search).get('net') === 'local' ? 'local' : 'peer';
+    const net = new URLSearchParams(window.location.search).get('net');
+    return net === 'local' || net === 'relay' ? net : 'peer';
   } catch {
     return 'peer';
+  }
+};
+
+// STUN finds each browser's public address; TURN relays the data when the
+// two cannot reach each other. A TURN service on port 443 (for example a free
+// Metered or Cloudflare account) can be added at build time through
+// REACT_APP_TURN_URLS, REACT_APP_TURN_USERNAME and REACT_APP_TURN_CREDENTIAL.
+export const iceServers = () => {
+  const servers = [
+    { urls: ['stun:stun.l.google.com:19302', 'stun:stun1.l.google.com:19302'] },
+    { urls: 'stun:stun.cloudflare.com:3478' },
+    {
+      urls: ['turn:eu-0.turn.peerjs.com:3478', 'turn:us-0.turn.peerjs.com:3478'],
+      username: 'peerjs',
+      credential: 'peerjsp',
+    },
+  ];
+  const extra = (process.env.REACT_APP_TURN_URLS || '').split(',').map((url) => url.trim()).filter(Boolean);
+
+  if (extra.length) {
+    servers.push({
+      urls: extra,
+      username: process.env.REACT_APP_TURN_USERNAME || '',
+      credential: process.env.REACT_APP_TURN_CREDENTIAL || '',
+    });
+  }
+
+  return servers;
+};
+
+const peerOptions = () => ({ debug: 0, config: { iceServers: iceServers() } });
+
+// The route that worked last time is tried first next time.
+export const savedRoute = () => {
+  try {
+    return window.localStorage.getItem(ROUTE_KEY) === 'relay' ? 'relay' : 'direct';
+  } catch {
+    return 'direct';
+  }
+};
+
+const saveRoute = (route) => {
+  try {
+    window.localStorage.setItem(ROUTE_KEY, route);
+  } catch {
+    // Private windows may block storage.
   }
 };
 
@@ -39,13 +94,18 @@ const peerErrorCode = (error) => {
       return 'not-found';
     case 'browser-incompatible':
       return 'unsupported';
+    case 'network':
+    case 'server-error':
+    case 'socket-error':
+    case 'socket-closed':
+      return 'blocked';
     default:
       return 'network';
   }
 };
 
 const hostWithPeer = (code, handlers) => {
-  const peer = new Peer(`${ID_PREFIX}${code.toLowerCase()}`, { debug: 0 });
+  const peer = new Peer(`${ID_PREFIX}${code.toLowerCase()}`, peerOptions());
   const connections = new Map();
 
   const ready = new Promise((resolve, reject) => {
@@ -80,6 +140,7 @@ const hostWithPeer = (code, handlers) => {
 
   return {
     ready,
+    owns: (peerId) => connections.has(peerId),
     send: (peerId, message) => connections.get(peerId)?.send(message),
     broadcast: (message) => connections.forEach((connection) => connection.send(message)),
     kick: (peerId) => connections.get(peerId)?.close(),
@@ -88,7 +149,7 @@ const hostWithPeer = (code, handlers) => {
 };
 
 const guestWithPeer = (code, handlers) => {
-  const peer = new Peer({ debug: 0 });
+  const peer = new Peer(peerOptions());
   let connection = null;
 
   const ready = new Promise((resolve, reject) => {
@@ -234,8 +295,182 @@ const guestWithChannel = (code, handlers) => {
   };
 };
 
-export const openHostTransport = (code, handlers) =>
-  transportKind() === 'local' ? hostWithChannel(code, handlers) : hostWithPeer(code, handlers);
+// ------------------------------------------------------------ the ladder
 
-export const openGuestTransport = (code, handlers) =>
-  transportKind() === 'local' ? guestWithChannel(code, handlers) : guestWithPeer(code, handlers);
+// The host listens on Direct and Relay together, so a friend on any network
+// finds the room. It is ready as soon as either route is up, which keeps a
+// host on a locked down network online through Relay.
+const hostOnEveryRoute = (code, handlers) => {
+  const routes = { direct: 'trying', relay: 'trying' };
+  const report = () => handlers.onRoutes?.({ ...routes });
+  const relay = hostWithRelay(code, handlers);
+  let direct = null;
+  let closed = false;
+  let opened = false;
+
+  const ready = new Promise((resolve, reject) => {
+    let relayFailed = null;
+    let directFailed = null;
+    const up = () => {
+      opened = true;
+      resolve();
+    };
+    const bothFailed = () => directFailed && relayFailed && reject(directFailed);
+
+    // After a reload the old room name can stay taken for a few seconds. When
+    // Relay already has the room open, Direct keeps trying in the background.
+    const openDirect = (attempt) => {
+      direct = hostWithPeer(code, { ...handlers, onError: () => {} });
+      direct.ready.then(
+        () => {
+          routes.direct = 'up';
+          report();
+          up();
+        },
+        (error) => {
+          if (error.message === 'code-taken' && opened && attempt < 6 && !closed) {
+            direct.close();
+            setTimeout(() => !closed && openDirect(attempt + 1), 3000);
+            return;
+          }
+          routes.direct = 'blocked';
+          report();
+          if (error.message === 'code-taken' && !opened) {
+            reject(error);
+            return;
+          }
+          directFailed = error;
+          bothFailed();
+        },
+      );
+    };
+
+    openDirect(0);
+    relay.ready.then(
+      () => {
+        routes.relay = 'up';
+        report();
+        up();
+      },
+      (error) => {
+        routes.relay = 'blocked';
+        report();
+        relayFailed = error;
+        bothFailed();
+      },
+    );
+  });
+
+  const owner = (peerId) => (relay.owns(peerId) ? relay : direct);
+
+  return {
+    ready,
+    routeOf: (peerId) => (relay.owns(peerId) ? 'relay' : 'direct'),
+    send: (peerId, message) => owner(peerId).send(peerId, message),
+    broadcast: (message) => {
+      direct.broadcast(message);
+      relay.broadcast(message);
+    },
+    kick: (peerId) => owner(peerId).kick(peerId),
+    close: () => {
+      closed = true;
+      direct.close();
+      relay.close();
+    },
+  };
+};
+
+// A guest tries the route that worked last time, and if it fails or is still
+// not open after a few seconds, starts the other one alongside. The first to
+// open wins and the other is closed, so the host only ever sees one hello.
+const guestOnBestRoute = (code, handlers, { mode = 'auto' } = {}) => {
+  const order = mode === 'relay' ? ['relay'] : mode === 'direct' ? ['direct'] : savedRoute() === 'relay' ? ['relay', 'direct'] : ['direct', 'relay'];
+  const make = { direct: guestWithPeer, relay: guestWithRelay };
+  const started = [];
+  let winner = null;
+  let closed = false;
+
+  const ready = new Promise((resolve, reject) => {
+    const errors = {};
+    let graceTimer = null;
+
+    const settleFailure = () => {
+      if (winner || Object.keys(errors).length < order.length) return;
+      // A room missing on Direct may still be open on Relay, so the most
+      // useful reason wins: no room, then a blocked network.
+      const reasons = Object.values(errors);
+      reject(new Error(reasons.includes('not-found') ? 'not-found' : reasons.includes('blocked') ? 'blocked' : reasons[0]));
+    };
+
+    const start = (route) => {
+      if (closed || winner || started.some((entry) => entry.route === route)) return;
+      handlers.onStage?.(route);
+
+      const transport = make[route](code, {
+        onMessage: (...args) => winner?.transport === transport && handlers.onMessage?.(...args),
+        onClose: () => winner?.transport === transport && handlers.onClose?.(),
+      });
+      started.push({ route, transport });
+
+      transport.ready.then(
+        () => {
+          if (winner || closed) {
+            transport.close();
+            return;
+          }
+          clearTimeout(graceTimer);
+          winner = { route, transport };
+          saveRoute(route);
+          started.filter((entry) => entry.transport !== transport).forEach((entry) => entry.transport.close());
+          resolve();
+        },
+        (error) => {
+          errors[route] = error.message === 'timeout' ? 'not-found' : error.message;
+          const next = order[order.indexOf(route) + 1];
+          if (next) start(next);
+          settleFailure();
+        },
+      );
+    };
+
+    start(order[0]);
+    if (order[1]) {
+      graceTimer = setTimeout(() => start(order[1]), DIRECT_GRACE);
+    }
+  });
+
+  return {
+    ready,
+    get route() {
+      return winner?.route || null;
+    },
+    send: (message) => winner?.transport.send(message),
+    close: () => {
+      closed = true;
+      started.forEach((entry) => entry.transport.close());
+    },
+  };
+};
+
+export const openHostTransport = (code, handlers) => {
+  const kind = transportKind();
+  if (kind === 'local') {
+    setTimeout(() => handlers.onRoutes?.({ direct: 'up', relay: 'off' }), 0);
+    return { ...hostWithChannel(code, handlers), routeOf: () => 'direct' };
+  }
+  if (kind === 'relay') {
+    const relay = hostWithRelay(code, handlers);
+    relay.ready.then(
+      () => handlers.onRoutes?.({ direct: 'off', relay: 'up' }),
+      () => handlers.onRoutes?.({ direct: 'off', relay: 'blocked' }),
+    );
+    return { ...relay, routeOf: () => 'relay' };
+  }
+  return hostOnEveryRoute(code, handlers);
+};
+
+export const openGuestTransport = (code, handlers, options = {}) => {
+  const kind = transportKind();
+  if (kind === 'local') return { ...guestWithChannel(code, handlers), route: 'local' };
+  return guestOnBestRoute(code, handlers, kind === 'relay' ? { mode: 'relay' } : options);
+};

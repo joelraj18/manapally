@@ -79,6 +79,8 @@ export default class RoomSession {
     this.lastGameState = null;
     this.myCode = null;
     this.connection = 'online'; // 'online' | 'reconnecting'
+    this.routes = { direct: 'trying', relay: 'trying' };
+    this.route = null; // the route a guest joined by: 'direct' | 'relay' | 'local'
   }
 
   // --------------------------------------------------------------- events
@@ -115,6 +117,10 @@ export default class RoomSession {
       onMessage: (peerId, message) => this.handleGuestMessage(peerId, message),
       onPeerClose: (peerId) => this.handleGuestLeft(peerId),
       onError: () => {},
+      onRoutes: (routes) => {
+        this.routes = routes;
+        this.emit('routes', routes);
+      },
     });
     return this.transport.ready;
   }
@@ -152,10 +158,12 @@ export default class RoomSession {
 
   // `rejoin` is a Player ID: the host then hands back that seat in a match
   // already under way instead of adding a new one.
-  static async join({ code, name, pieceKey, rejoin = null }) {
+  static async join({ code, name, pieceKey, rejoin = null, mode = 'auto', onStage = null }) {
     const session = new RoomSession('guest');
     session.code = cleanCode(code);
     session.myCode = rejoin ? cleanCode(rejoin) : null;
+    session.mode = mode;
+    session.onStage = onStage;
 
     // A rejoin is only complete once the host has said which match it is.
     const started = rejoin
@@ -182,26 +190,36 @@ export default class RoomSession {
     }
 
     session.status = 'online';
+    session.onStage = null;
     return session;
   }
 
   async connect(hello) {
-    const transport = openGuestTransport(this.code, {
-      onMessage: (_, message) => {
-        if (this.transport === transport) this.handleHostMessage(message);
+    const transport = openGuestTransport(
+      this.code,
+      {
+        onMessage: (_, message) => {
+          if (this.transport === transport) this.handleHostMessage(message);
+        },
+        onClose: () => {
+          if (this.transport === transport) this.handleHostLost();
+        },
+        onStage: (stage) => this.onStage?.(stage),
       },
-      onClose: () => {
-        if (this.transport === transport) this.handleHostLost();
-      },
-    });
+      { mode: this.mode || 'auto' },
+    );
     this.transport = transport;
 
     try {
       await transport.ready;
     } catch (error) {
       transport.close();
-      throw new Error(error.message === 'not-found' || error.message === 'timeout' ? 'not-found' : 'network');
+      const known = ['not-found', 'blocked', 'unsupported'];
+      throw new Error(error.message === 'timeout' ? 'not-found' : known.includes(error.message) ? error.message : 'network');
     }
+
+    this.route = transport.route;
+    this.onStage?.(`joined-${transport.route}`);
 
     const welcome = new Promise((resolve, reject) => {
       const timer = setTimeout(() => reject(new Error('not-found')), 8000);
@@ -320,6 +338,7 @@ export default class RoomSession {
           pieceKey: this.freePiece(message.pieceKey),
           kind: 'human',
           clientId: peerId,
+          route: this.transport.routeOf?.(peerId) || 'direct',
         });
         this.lobby.tableSize = Math.max(this.lobby.tableSize, this.lobby.seats.length);
 
@@ -374,6 +393,7 @@ export default class RoomSession {
 
     if (seat) {
       seat.clientId = peerId;
+      seat.route = this.transport.routeOf?.(peerId) || seat.route;
     }
 
     this.transport.send(peerId, { t: 'welcome', clientId: peerId, code: this.code });
