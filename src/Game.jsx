@@ -270,7 +270,7 @@ export default function Game() {
           <h2 id="closing-heading">Your table is ready</h2>
           <p className="section-lede">Pick a piece, open a private room and make the first move</p>
           <div className="closing-actions">
-            <GoldButton onClick={() => openLobby()}>Create a room</GoldButton>
+            <GoldButton onClick={() => openLobby()}>Start game</GoldButton>
             <button type="button" className="text-link text-link--large" onClick={() => scrollToSection('how-to-play')}>
               Read the rules <span aria-hidden="true">›</span>
             </button>

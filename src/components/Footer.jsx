@@ -7,7 +7,7 @@ export default function Footer({ onNavigate, onPlay, onMusicToggle, musicEnabled
     {
       title: 'Play',
       links: [
-        { label: 'Create a room', action: onPlay },
+        { label: 'Start game', action: onPlay },
         { label: 'Choose a piece', action: () => onNavigate('pieces') },
         { label: musicEnabled ? 'Turn music off' : 'Turn music on', action: onMusicToggle },
       ],

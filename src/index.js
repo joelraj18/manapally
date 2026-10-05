@@ -5,6 +5,9 @@ import './index.css';
 import Game from './Game';
 import LoadingScreen from './components/LoadingScreen';
 import reportWebVitals from './reportWebVitals';
+import { initTheme } from './services/theme';
+
+initTheme();
 
 function ManapallyApp() {
   const [isLoading, setIsLoading] = useState(true);

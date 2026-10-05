@@ -23,6 +23,7 @@ import GameEngine, {
 } from './gameEngine';
 import { START_REWARD, TOTAL_MATCH_TURNS } from './matchRules';
 import { PIECES, PieceMark } from './pieces.jsx';
+import ThemeToggle from '../../components/ThemeToggle';
 import TileArt from './tileArt.jsx';
 import './board-game.css';
 
@@ -1492,6 +1493,7 @@ export default function BoardGame({
             </svg>
           </button>
           {onAudio && <SoundMixer audio={audioSettings} onAudio={onAudio} />}
+          <ThemeToggle />
           {canProposeEnd && (
             <button className="end-game-button" type="button" onClick={() => setSheet('end')}>
               End game

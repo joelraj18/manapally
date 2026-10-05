@@ -382,7 +382,7 @@
   position: absolute;
   width: 190px;
   height: 190px;
-  background: radial-gradient(closest-side, color-mix(in srgb, var(--piece) 26%, #ffffff), transparent);
+  background: radial-gradient(closest-side, color-mix(in srgb, var(--piece) 26%, var(--surface)), transparent);
   border-radius: 50%;
   transition: transform 0.6s var(--ease);
 }

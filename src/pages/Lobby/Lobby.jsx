@@ -1,6 +1,7 @@
 import { useEffect, useRef, useState } from 'react';
 import BrandLogo from '../../components/BrandLogo';
 import GoldButton from '../../components/GoldButton';
+import ThemeToggle from '../../components/ThemeToggle';
 import { PIECES, PIECE_ORDER, PieceMark } from '../Game/pieces.jsx';
 import './lobby.css';
 
@@ -186,9 +187,12 @@ export default function Lobby({ onBack, onSession, initialPiece = 'lamp', initia
           <BrandLogo size={22} />
         </button>
 
-        <button className="lobby-back" type="button" onClick={onBack}>
-          <span aria-hidden="true">‹</span> Home
-        </button>
+        <div className="topbar-right">
+          <ThemeToggle />
+          <button className="lobby-back" type="button" onClick={onBack}>
+            <span aria-hidden="true">‹</span> Home
+          </button>
+        </div>
       </div>
 
       <section className="lobby-layout">

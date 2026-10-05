@@ -105,7 +105,7 @@ export default function Hero({ onCreateRoom, onExplore }) {
         </p>
 
         <div className="hero-actions">
-          <GoldButton onClick={onCreateRoom}>Create a room</GoldButton>
+          <GoldButton onClick={onCreateRoom}>Start game</GoldButton>
 
           <button type="button" className="text-link text-link--large" onClick={onExplore}>
             Learn how to play <span aria-hidden="true">›</span>
