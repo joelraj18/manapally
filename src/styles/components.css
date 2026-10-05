@@ -3,38 +3,77 @@
 /* District colour families, used by the board and the landing page */
 
 :root {
-  --color-maroon: #7a3348;
-  --color-peacock: #6fa6cf;
-  --color-rose: #d24c80;
-  --color-saffron: #e8912d;
-  --color-kumkum: #c4353a;
-  --color-turmeric: #e3b022;
-  --color-emerald: #2f8f5b;
-  --color-indigo: #2f4c94;
+  --color-maroon: #a3195b;
+  --color-peacock: #1fa2e0;
+  --color-rose: #ff3d8b;
+  --color-saffron: #ff8a00;
+  --color-kumkum: #e53935;
+  --color-turmeric: #ffc400;
+  --color-emerald: #14b86a;
+  --color-indigo: #3d5afe;
 }
 
-/* Seat colours tint every piece through currentColor */
+/* Seat colours tint every piece through currentColor, matching PIECES */
 
 .seat-lamp {
-  --seat: #3d9e7a;
-  color: #3d9e7a;
+  --seat: #1e9e5a;
+  color: #1e9e5a;
 }
 
 .seat-temple {
-  --seat: #b43d36;
-  color: #b43d36;
+  --seat: #d63031;
+  color: #d63031;
 }
 
 .seat-elephant {
-  --seat: #c98c2e;
-  color: #c98c2e;
+  --seat: #f0700c;
+  color: #f0700c;
 }
 
 .seat-bell {
-  --seat: #5580b0;
-  color: #5580b0;
+  --seat: #2f5bea;
+  color: #2f5bea;
 }
 
+.seat-tiger {
+  --seat: #f2b705;
+  color: #f2b705;
+}
+
+.seat-coconut {
+  --seat: #8b5a2b;
+  color: #8b5a2b;
+}
+
+.seat-gun {
+  --seat: #1c1c1e;
+  color: #1c1c1e;
+}
+
+.seat-dumbbell {
+  --seat: #7f8c99;
+  color: #7f8c99;
+}
+
+.seat-bat {
+  --seat: #0aa5c2;
+  color: #0aa5c2;
+}
+
+.seat-auto {
+  --seat: #8cc152;
+  color: #8cc152;
+}
+
+.seat-clapper {
+  --seat: #d6338a;
+  color: #d6338a;
+}
+
+.seat-crown {
+  --seat: #7b4dff;
+  color: #7b4dff;
+}
 
 
 .you-chip {

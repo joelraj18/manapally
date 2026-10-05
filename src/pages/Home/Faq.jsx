@@ -12,7 +12,11 @@ const questions = [
   },
   {
     q: 'Can friends join my room?',
-    a: 'Yes, share your six character room code and friends anywhere join from the lobby with Join room, then chat with the table while you play',
+    a: 'Yes, share your invite link or six character room code and friends anywhere join from the lobby, then chat with the table while you play',
+  },
+  {
+    q: 'My friend cannot join, what can we try?',
+    a: 'Send the invite link from the waiting room so the code is filled in for them, and keep the Manapally tab open on the host screen because phones pause tabs in the background, joining uses Auto by default, which connects directly and switches to Relay on college, office or VPN networks that block direct links, if it still fails open Having trouble joining in the lobby and run Check connection, then try mobile data or a hotspot',
   },
   {
     q: 'How long does a match last?',

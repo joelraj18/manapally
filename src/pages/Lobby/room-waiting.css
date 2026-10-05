@@ -107,6 +107,98 @@
   text-underline-offset: 3px;
 }
 
+.invite-actions {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: 8px 18px;
+}
+
+.invite-code-card .invite-link-button {
+  padding: 6px 12px;
+  color: #ffffff;
+  background: var(--sage-700);
+  border-radius: var(--radius-pill);
+}
+
+.invite-code-card .invite-link-button:hover {
+  background: var(--sage-800);
+  text-decoration: none;
+}
+
+.route-status {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: 6px 8px;
+  width: min(420px, 100%);
+  margin: 14px 0 18px;
+}
+
+.route-status p {
+  flex-basis: 100%;
+  margin: 2px 0 0;
+  color: var(--ink-secondary);
+  font-size: 0.84rem;
+  line-height: 1.4;
+}
+
+.route-pill {
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
+  padding: 3px 10px;
+  color: var(--ink-secondary);
+  background: var(--sage-50);
+  border: 1px solid var(--hairline);
+  border-radius: var(--radius-pill);
+  font-size: 0.76rem;
+  font-weight: 600;
+}
+
+.route-pill::before {
+  width: 7px;
+  height: 7px;
+  background: #b9b9b9;
+  border-radius: 50%;
+  content: '';
+}
+
+.route-pill--up {
+  color: #146c3b;
+}
+
+.route-pill--up::before {
+  background: #1f9d55;
+}
+
+.route-pill--down {
+  color: #a32b2b;
+}
+
+.route-pill--down::before {
+  background: #d93838;
+}
+
+.route-note {
+  max-width: 420px;
+  margin: 12px 0 16px;
+  color: var(--ink-secondary);
+  font-size: 0.84rem;
+}
+
+.relay-chip {
+  display: inline-block;
+  margin-left: 6px;
+  padding: 0 7px;
+  color: #5b3fd1;
+  background: #eee9ff;
+  border-radius: var(--radius-pill);
+  font-size: 0.68rem;
+  font-style: normal;
+  font-weight: 600;
+}
+
 .waiting-room-panel {
   padding: clamp(26px, 4vw, 40px);
   background: var(--surface);

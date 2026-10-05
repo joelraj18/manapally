@@ -51,9 +51,28 @@ const loadAudio = () => {
   }
 };
 
+// An invite link (?join=CODE) opens the lobby with the room code filled in.
+// The code is then taken out of the address so a reload does not reuse it.
+const inviteCode = () => {
+  try {
+    const url = new URL(window.location.href);
+    const code = (url.searchParams.get('join') || '').toUpperCase().replace(/[^A-Z0-9]/g, '').slice(0, 6);
+
+    if (url.searchParams.has('join')) {
+      url.searchParams.delete('join');
+      window.history.replaceState(null, '', url.toString());
+    }
+
+    return code.length === 6 ? code : '';
+  } catch {
+    return '';
+  }
+};
+
 export default function Game() {
   const [audio, setAudio] = useState(loadAudio);
-  const [currentView, setCurrentView] = useState('home');
+  const [invite] = useState(inviteCode);
+  const [currentView, setCurrentView] = useState(() => (invite ? 'lobby' : 'home'));
   const [lobbyPiece, setLobbyPiece] = useState('lamp');
   const [session, setSession] = useState(null);
   const [match, setMatch] = useState(null);
@@ -184,6 +203,7 @@ export default function Game() {
     view = (
       <Lobby
         initialPiece={lobbyPiece}
+        initialCode={invite}
         onBack={() => setCurrentView('home')}
         onSession={(next, { resume } = {}) => {
           setSession(next);

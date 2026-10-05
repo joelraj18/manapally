@@ -1,7 +1,7 @@
 const steps = [
   {
     title: 'Choose a name and a piece',
-    text: 'Enter a display name in the lobby and pick one of four royal pieces, each with its own seat colour',
+    text: 'Enter a display name in the lobby and pick one of twelve pieces, from the Deepam and the Tiger to the Cricket Bat and the Crown, each with its own seat colour',
   },
   {
     title: 'Open a private room',
