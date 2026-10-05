@@ -510,16 +510,59 @@
 
 /* Tokens */
 
-.space-tokens {
+/* Tokens live on one layer over the board and glide between tile centres */
+.token-layer {
   position: absolute;
-  z-index: 2;
-  right: 3px;
-  bottom: 3px;
-  display: flex;
-  flex-wrap: wrap;
-  justify-content: flex-end;
-  gap: 2px;
-  max-width: 80%;
+  z-index: 6;
+  inset: 0;
+  pointer-events: none;
+}
+
+.token-slot {
+  position: absolute;
+  top: 0;
+  left: 0;
+  width: 0;
+  height: 0;
+  transition-property: transform;
+  transition-timing-function: cubic-bezier(0.45, 0, 0.25, 1);
+  will-change: transform;
+}
+
+.token-slot .board-token {
+  position: absolute;
+  top: 0;
+  left: 0;
+  translate: -50% -50%;
+  animation: tokenStep var(--step, 0.5s) cubic-bezier(0.45, 0, 0.25, 1);
+}
+
+.token-slot .board-token--waiting {
+  animation:
+    tokenStep var(--step, 0.5s) cubic-bezier(0.45, 0, 0.25, 1),
+    tokenWait 2.4s var(--step, 0.5s) var(--ease) infinite;
+}
+
+/* One step: a low arc over the glide, then a soft landing */
+@keyframes tokenStep {
+  0% {
+    transform: none;
+  }
+
+  45% {
+    transform: translateY(-38%) scale(1.06);
+    box-shadow:
+      0 0 0 1.5px currentColor,
+      0 12px 14px rgba(29, 35, 22, 0.18);
+  }
+
+  85% {
+    transform: translateY(3%) scale(1.03, 0.96);
+  }
+
+  100% {
+    transform: none;
+  }
 }
 
 .board-token {
@@ -792,23 +835,6 @@
 
 /* The time left before a card or pop up closes, driven by the engine's
    own clock so every screen shows the same moment */
-.hold-timer {
-  position: absolute;
-  bottom: 0;
-  left: 0;
-  width: 100%;
-  height: 4px;
-  background: rgba(80, 94, 60, 0.1);
-}
-
-.hold-timer > span {
-  display: block;
-  height: 100%;
-  background: linear-gradient(90deg, var(--sage-400), var(--sage-700));
-  transform-origin: left center;
-  transition: transform 0.12s linear;
-}
-
 .hold-close {
   margin-top: 14px;
   font-weight: 600;
@@ -1546,19 +1572,6 @@
   color: #ffffff;
   background: var(--danger);
   animation: pulse 0.8s var(--ease) infinite;
-}
-
-.auction-timer {
-  height: 4px;
-  background: var(--sage-100);
-}
-
-.auction-timer span {
-  display: block;
-  height: 100%;
-  background: linear-gradient(90deg, var(--sage-500), var(--sage-700));
-  transform-origin: left center;
-  transition: transform 0.1s linear;
 }
 
 .auction-lead {
@@ -3398,6 +3411,15 @@
 }
 
 @media (prefers-reduced-motion: reduce) {
+  .token-slot {
+    transition: none;
+  }
+
+  .token-slot .board-token,
+  .token-slot .board-token--waiting {
+    animation: none;
+  }
+
   .board-token,
   .board-token--waiting,
   .dice-display--rolling .die-face,
@@ -3411,4 +3433,215 @@
   .centre-crown {
     animation: none;
   }
+}
+
+/* Pop up clock: a small ring in the corner that empties smoothly */
+.pop-dial {
+  position: absolute;
+  z-index: 8;
+  top: 14px;
+  right: 14px;
+  width: 28px;
+  height: 28px;
+  pointer-events: none;
+  transform: rotate(-90deg);
+}
+
+.auction-sheet {
+  position: relative;
+}
+
+.radial-dial-track,
+.radial-dial-arc {
+  fill: none;
+  stroke-width: 3.2;
+}
+
+.radial-dial-track {
+  stroke: var(--hairline-strong);
+}
+
+.radial-dial-arc {
+  stroke: var(--accent);
+  stroke-dasharray: 94.25;
+  stroke-dashoffset: 0;
+  stroke-linecap: round;
+  animation-name: dialEmpty;
+  animation-timing-function: linear;
+  animation-fill-mode: forwards;
+}
+
+@keyframes dialEmpty {
+  to {
+    stroke-dashoffset: 94.25;
+  }
+}
+
+@media (prefers-reduced-motion: reduce) {
+  .radial-dial-arc {
+    animation: none;
+  }
+}
+
+/* Raise funds: the player in debt picks what to sell or mortgage */
+.debt-sheet {
+  position: relative;
+  display: flex;
+  width: min(520px, 100%);
+  max-height: calc(100vh - 96px);
+  flex-direction: column;
+}
+
+.debt-sheet .property-card-header {
+  padding-right: 56px;
+}
+
+.debt-sheet .property-card-body {
+  min-height: 0;
+  overflow-y: auto;
+}
+
+.debt-progress {
+  display: flex;
+  align-items: baseline;
+  justify-content: space-between;
+  gap: 12px;
+  padding: 12px 14px;
+  background: var(--sage-50);
+  border-radius: var(--radius-sm);
+  font-size: 0.92rem;
+}
+
+.debt-progress strong {
+  font-variant-numeric: tabular-nums;
+}
+
+.debt-progress > span:last-child {
+  font-weight: 600;
+}
+
+.debt-help {
+  margin: 10px 0 4px;
+  color: var(--ink-tertiary);
+  font-size: 0.82rem;
+  line-height: 1.45;
+}
+
+.debt-group h4 {
+  margin: 14px 0 6px;
+  color: var(--sage-700);
+  font-size: 0.78rem;
+  font-weight: 600;
+  letter-spacing: 0.02em;
+}
+
+.debt-group ul {
+  display: grid;
+  gap: 6px;
+  margin: 0;
+  padding: 0;
+  list-style: none;
+}
+
+.debt-group li {
+  display: flex;
+  align-items: center;
+  gap: 10px;
+  padding: 8px 10px 8px 12px;
+  background: var(--surface);
+  border: 1px solid var(--hairline);
+  border-left: 4px solid var(--family, var(--sage-400));
+  border-radius: 10px;
+  animation: rise 0.35s var(--ease-out) backwards;
+}
+
+.debt-name {
+  display: grid;
+  flex: 1;
+  min-width: 0;
+}
+
+.debt-name strong {
+  font-size: 0.9rem;
+}
+
+.debt-name em {
+  color: var(--ink-tertiary);
+  font-size: 0.74rem;
+  font-style: normal;
+}
+
+.debt-action {
+  flex: none;
+  padding: 7px 12px;
+  color: #ffffff;
+  background: var(--accent);
+  border: 0;
+  border-radius: var(--radius-pill);
+  cursor: pointer;
+  font: inherit;
+  font-size: 0.8rem;
+  font-weight: 600;
+  transition:
+    background 0.25s var(--ease),
+    transform 0.25s var(--ease-spring);
+}
+
+.debt-action:hover:not(:disabled) {
+  background: var(--accent-hover);
+  transform: translateY(-1px);
+}
+
+.debt-action:disabled {
+  color: var(--ink-tertiary);
+  background: var(--sage-100);
+  cursor: not-allowed;
+}
+
+.debt-footer {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  justify-content: space-between;
+  gap: 8px 12px;
+  margin-top: 16px;
+  padding-top: 14px;
+  border-top: 1px solid var(--hairline);
+  color: var(--ink-tertiary);
+  font-size: 0.8rem;
+}
+
+.debt-bankrupt {
+  padding: 7px 12px;
+  color: var(--danger);
+  background: transparent;
+  border: 1px solid color-mix(in srgb, var(--danger) 45%, transparent);
+  border-radius: var(--radius-pill);
+  cursor: pointer;
+  font: inherit;
+  font-size: 0.8rem;
+  font-weight: 600;
+}
+
+.debt-bankrupt:hover {
+  background: color-mix(in srgb, var(--danger) 10%, transparent);
+}
+
+.debt-banner {
+  display: flex;
+  align-items: center;
+  gap: 10px;
+  margin: 0 0 12px;
+  padding: 10px 12px;
+  color: var(--ink-secondary);
+  background: var(--sage-50);
+  border-radius: var(--radius-sm);
+  font-size: 0.84rem;
+}
+
+.debt-banner .radial-dial {
+  width: 22px;
+  height: 22px;
+  flex: none;
+  transform: rotate(-90deg);
 }

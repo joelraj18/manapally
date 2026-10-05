@@ -22,11 +22,12 @@ import { START_REWARD, TOTAL_MATCH_TURNS } from './matchRules';
 
 export const DEFAULT_TIMING = {
   roll: 620, // dice tumble before the result shows
-  step: 280, // per space while a token walks
+  step: 600, // per space while a token walks, slow enough to follow tile by tile
   afterRoll: 500, // pause between showing the dice and moving
-  card: 7000, // a drawn card stays face up this long
-  notice: 5000, // a rent, tax or Go pop up stays up this long before the money moves
+  card: 8500, // a drawn card stays face up this long
+  notice: 6500, // a rent, tax or Go pop up stays up this long before the money moves
   actionWindow: 10000, // after the move, time left to build before the turn ends
+  debt: 60000, // a player short of cash chooses what to sell or mortgage within this
   turnGap: 600, // breath between turns
   botDelay: 900, // before a computer opponent rolls
   auction: 12000, // auction length
@@ -192,6 +193,7 @@ export const createInitialState = (players) => {
     turnPhase: 'pre-roll', // 'pre-roll' | 'moving' | 'actions'
     actionEndsAt: null, // when the post roll building window closes
     notice: null, // a rent, tax or Go pop up waiting to settle
+    debt: null, // a payment a player is raising cash for, choosing what to sell or mortgage
     log: [],
     dice: null,
     rolling: false,
@@ -285,6 +287,7 @@ export default class GameEngine {
       turnPhase: 'pre-roll',
       actionEndsAt: null,
       notice: null,
+      debt: null,
       drawnCard: null,
       purchaseOffer: null,
       auction: null,
@@ -701,7 +704,7 @@ export default class GameEngine {
         text: `${this.nameOf(playerId)} pays the fine to leave Jail`,
         amount: -DETENTION_FINE,
       },
-      () => this.charge(playerId, DETENTION_FINE, null, say),
+      () => this.collect(playerId, DETENTION_FINE, null, say, 'the Jail fine'),
     );
   }
 
@@ -945,7 +948,7 @@ export default class GameEngine {
         if (amount > 0) {
           const paid = await this.settle(
             { kind: 'tax', playerId, title: space.name, text: `${name} pays ${space.name} to the bank`, amount: -amount },
-            () => this.charge(playerId, amount, null, say),
+            () => this.collect(playerId, amount, null, say, space.name),
           );
           say(`${name} paid ${formatRupees(paid)} ${space.name}`);
         }
@@ -998,7 +1001,7 @@ export default class GameEngine {
             text: `${name} pays rent to ${owner}`,
             amount: -rent,
           },
-          () => this.charge(playerId, rent, deed.owner, say),
+          () => this.collect(playerId, rent, deed.owner, say, `rent at ${space.name}`),
         );
         say(`${name} paid ${formatRupees(paid)} rent to ${owner}`);
       }
@@ -1333,26 +1336,26 @@ export default class GameEngine {
         break;
 
       case 'pay': {
-        const paid = this.charge(playerId, effect.amount, null, say);
+        const paid = await this.collect(playerId, effect.amount, null, say, deckName);
         say(`${name} paid ${formatRupees(paid)}`);
         break;
       }
 
       case 'pay-each':
-        this.alivePlayers()
-          .filter((other) => other.id !== playerId)
-          .forEach((other) => {
-            if (this.isAlive(playerId)) {
-              this.charge(playerId, effect.amount, other.id, say);
-            }
-          });
+        for (const other of this.alivePlayers().filter((entry) => entry.id !== playerId)) {
+          if (this.isAlive(playerId)) {
+            // eslint-disable-next-line no-await-in-loop
+            await this.collect(playerId, effect.amount, other.id, say, deckName);
+          }
+        }
         say(`${name} paid ${formatRupees(effect.amount)} to each player`);
         break;
 
       case 'collect-each':
-        this.alivePlayers()
-          .filter((other) => other.id !== playerId)
-          .forEach((other) => this.charge(other.id, effect.amount, playerId, say));
+        for (const other of this.alivePlayers().filter((entry) => entry.id !== playerId)) {
+          // eslint-disable-next-line no-await-in-loop
+          await this.collect(other.id, effect.amount, playerId, say, deckName);
+        }
         say(`${name} collected ${formatRupees(effect.amount)} from each player`);
         break;
 
@@ -1375,7 +1378,7 @@ export default class GameEngine {
         const bill = houses * effect.perHouse + hotels * effect.perHotel;
 
         if (bill > 0) {
-          const paid = this.charge(playerId, bill, null, say);
+          const paid = await this.collect(playerId, bill, null, say, 'repairs');
           say(`${name} paid ${formatRupees(paid)} for repairs`);
         } else {
           say(`${name} owns no buildings, nothing to repair`);
@@ -1389,6 +1392,115 @@ export default class GameEngine {
   }
 
   // ------------------------------------------------------- debts and estate
+
+  // Cash a player could raise by selling every building and mortgaging every
+  // property they could, in the order the rules allow.
+  raisableFor(playerId) {
+    const nextBuilding = (current) =>
+      Object.keys(current).find(
+        (id) => current[id].owner === playerId && Estate.canSellBuilding(current, id, BOARD_SPACES),
+      );
+    const nextMortgage = (current) =>
+      Object.keys(current).find(
+        (id) => current[id].owner === playerId && Estate.canMortgage(current, id, BOARD_SPACES),
+      );
+    let deeds = { ...this.state.deeds };
+    let total = 0;
+
+    for (;;) {
+      const building = nextBuilding(deeds);
+
+      if (building) {
+        const result = Estate.sellOneBuilding(deeds, building, BOARD_SPACES);
+        deeds = result.updatedDeeds;
+        total += result.cash;
+      } else {
+        const mortgage = nextMortgage(deeds);
+
+        if (!mortgage) {
+          return total;
+        }
+
+        deeds = { ...deeds, [mortgage]: { ...deeds[mortgage], mortgaged: true } };
+        total += Estate.mortgageValue(mortgage, BOARD_SPACES);
+      }
+    }
+  }
+
+  // Takes `amount` from a player. A person short of cash first gets to choose
+  // what to sell or mortgage, with a clock; computers, away players and anyone
+  // who could not cover it even with everything are settled at once.
+  async collect(playerId, amount, creditorId, say, reason = 'a payment') {
+    const balance = this.state.balances[playerId];
+    const short = amount - balance;
+
+    if (
+      amount <= 0 ||
+      !this.isAlive(playerId) ||
+      short <= 0 ||
+      this.isAuto(playerId) ||
+      this.timing.debt <= 0 ||
+      this.raisableFor(playerId) < short
+    ) {
+      return this.charge(playerId, amount, creditorId, say);
+    }
+
+    say(`${this.nameOf(playerId)} is raising cash for ${reason}`);
+
+    await new Promise((resolve) => {
+      let timer = null;
+      const done = () => {
+        this.clearLater(timer);
+        this.pendingDebt = null;
+        resolve();
+      };
+
+      this.pendingDebt = { playerId, amount, done };
+      this.set({
+        debt: {
+          playerId,
+          amount,
+          creditorId,
+          reason,
+          endsAt: Date.now() + this.timing.debt,
+          length: this.timing.debt,
+        },
+      });
+      timer = this.later(done, this.timing.debt);
+    });
+
+    if (!this.destroyed) {
+      this.set({ debt: null });
+    }
+
+    if (this.declaredBankrupt === playerId) {
+      this.declaredBankrupt = null;
+      this.declareBankrupt(playerId, creditorId, say);
+      return 0;
+    }
+
+    return this.charge(playerId, amount, creditorId, say);
+  }
+
+  // The player in debt gives up: everything goes to whoever they owe.
+  giveUpDebt(playerId) {
+    if (this.pendingDebt?.playerId !== playerId) {
+      return false;
+    }
+
+    this.declaredBankrupt = playerId;
+    this.pendingDebt.done();
+    return true;
+  }
+
+  // Once a sale or mortgage covers the debt, the payment goes ahead at once.
+  checkDebt(playerId) {
+    const pending = this.pendingDebt;
+
+    if (pending && pending.playerId === playerId && this.state.balances[playerId] >= pending.amount) {
+      pending.done();
+    }
+  }
 
   // Takes `amount` from a player, raising cash from their estate if needed.
   // Anything they still cannot cover bankrupts them. Returns what was paid.
@@ -1517,11 +1629,20 @@ export default class GameEngine {
 
   // Owner actions from the property sheet. Each returns true when applied.
   manageProperty(playerId, spaceId, action) {
+    // While raising cash for a debt, only selling and mortgaging are open.
+    if (this.state.debt?.playerId === playerId && action !== 'sell' && action !== 'mortgage') {
+      return false;
+    }
+
     const applied = this.applyManage(playerId, Number(spaceId), action);
 
     // A new house can make a pending offer impossible.
     if (applied && action === 'build') {
       this.pruneTrades();
+    }
+
+    if (applied) {
+      this.checkDebt(playerId);
     }
 
     return applied;
@@ -1610,7 +1731,7 @@ export default class GameEngine {
   proposeTrade(fromId, offer = {}) {
     const from = this.player(fromId);
 
-    if (!from || from.kind !== 'human' || from.away) {
+    if (!from || from.kind !== 'human' || from.away || this.state.debt?.playerId === fromId) {
       return false;
     }
 
@@ -1933,6 +2054,11 @@ export default class GameEngine {
 
       if (this.pendingAction?.playerId === playerId) {
         this.pendingAction.finish();
+      }
+
+      // A debt they were choosing for is settled automatically.
+      if (this.pendingDebt?.playerId === playerId) {
+        this.pendingDebt.done();
       }
 
       // Offers to or from someone who dropped out are withdrawn.

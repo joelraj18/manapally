@@ -1,4 +1,4 @@
-import { useCallback, useEffect, useMemo, useRef, useState } from 'react';
+import { useCallback, useEffect, useLayoutEffect, useMemo, useRef, useState } from 'react';
 import AnimatedBalance from '../../components/AnimatedBalance';
 import BrandLogo, { BrandMark } from '../../components/BrandLogo';
 import ChatPanel from '../../components/ChatPanel';
@@ -139,6 +139,130 @@ function useCountdown(endsAt) {
   return endsAt ? Math.max(0, endsAt - Date.now()) : 0;
 }
 
+// A small ring that empties as a pop up's time runs out. The browser
+// animates it, so it moves smoothly; the time already gone is read once when
+// it appears, so a ring that mounts late (a rejoin) starts at the right point.
+function RadialDial({ endsAt, length, className = '' }) {
+  const [elapsed] = useState(() => Math.max(0, Math.min(length, length - (endsAt - Date.now()))));
+
+  if (!length) {
+    return null;
+  }
+
+  return (
+    <svg className={`radial-dial ${className}`.trim()} viewBox="0 0 36 36" aria-hidden="true" focusable="false">
+      <circle className="radial-dial-track" cx="18" cy="18" r="15" />
+      <circle
+        className="radial-dial-arc"
+        cx="18"
+        cy="18"
+        r="15"
+        style={{ animationDuration: `${length}ms`, animationDelay: `-${elapsed}ms` }}
+      />
+    </svg>
+  );
+}
+
+// Where each token is drawn. It follows the real board position one tile at
+// a time, so a token always walks the track, even when a snapshot from the
+// host skips tiles (Relay sends the board a few times a second). Short moves
+// forward or back are walked; anything longer, like Go to Jail, glides there.
+const TRACK = 40;
+
+function useWalkingPositions(positions, stepMs) {
+  const [shown, setShown] = useState(positions);
+  const lastMove = useRef(0);
+
+  useEffect(() => {
+    const next = { ...shown };
+    let changed = false;
+    let behind = 0;
+
+    Object.keys(positions).forEach((id) => {
+      const from = shown[id] ?? positions[id];
+      const to = positions[id];
+
+      if (from === to) {
+        return;
+      }
+
+      const ahead = (to - from + TRACK) % TRACK;
+      const back = (from - to + TRACK) % TRACK;
+
+      if (ahead <= 12) {
+        next[id] = (from + 1) % TRACK;
+        behind = Math.max(behind, ahead);
+      } else if (back <= 3) {
+        next[id] = (from - 1 + TRACK) % TRACK;
+        behind = Math.max(behind, back);
+      } else {
+        next[id] = to;
+      }
+
+      changed = true;
+    });
+
+    if (!changed) {
+      return undefined;
+    }
+
+    // A little quicker than the host's own step, so it never falls behind,
+    // and quicker still when it has a lot of catching up to do.
+    const gap = behind > 6 ? Math.min(300, stepMs) : stepMs * 0.9;
+    const wait = Math.max(0, gap - (Date.now() - lastMove.current));
+    const timer = setTimeout(() => {
+      lastMove.current = Date.now();
+      setShown(next);
+    }, wait);
+
+    return () => clearTimeout(timer);
+  }, [positions, shown, stepMs]);
+
+  return shown;
+}
+
+// Tile centres inside the board, measured without transforms so a tile that
+// lifts on hover never moves the tokens. Measured again whenever the board
+// changes size.
+function useTileCentres(boardRef, tileRefs) {
+  const [centres, setCentres] = useState({});
+
+  useLayoutEffect(() => {
+    const board = boardRef.current;
+
+    if (!board) {
+      return undefined;
+    }
+
+    const measure = () => {
+      const next = {};
+      Object.entries(tileRefs.current).forEach(([id, tile]) => {
+        if (tile) {
+          next[id] = {
+            x: tile.offsetLeft + tile.offsetWidth / 2,
+            y: tile.offsetTop + tile.offsetHeight * 0.66,
+            w: tile.offsetWidth,
+          };
+        }
+      });
+      setCentres(next);
+    };
+
+    measure();
+
+    if (typeof ResizeObserver !== 'function') {
+      window.addEventListener('resize', measure);
+      return () => window.removeEventListener('resize', measure);
+    }
+
+    const observer = new ResizeObserver(measure);
+    observer.observe(board);
+    return () => observer.disconnect();
+  }, [boardRef, tileRefs]);
+
+  return centres;
+}
+
 export default function BoardGame({
   players: seatPlayers,
   myPlayerId,
@@ -162,6 +286,7 @@ export default function BoardGame({
   const [sheet, setSheet] = useState(null); // 'dice' | 'match' | 'end' | 'cards' | null
   const [cardsFor, setCardsFor] = useState(null);
   const [tradeDraft, setTradeDraft] = useState(null); // the offer being composed
+  const [confirmBankrupt, setConfirmBankrupt] = useState(false);
   const [tradeChoices, setTradeChoices] = useState({}); // mortgage choices on an incoming offer
   const [hiddenTrades, setHiddenTrades] = useState([]); // incoming offers put aside for later
   const [showResults, setShowResults] = useState(true);
@@ -254,6 +379,9 @@ export default function BoardGame({
           break;
         case 'trade-cancel':
           engine.cancelTrade(player.id, action.tradeId);
+          break;
+        case 'debt-bankrupt':
+          engine.giveUpDebt(player.id);
           break;
         default:
           break;
@@ -361,6 +489,9 @@ export default function BoardGame({
         case 'trade-cancel':
           engine.cancelTrade(myPlayerId, action.tradeId);
           break;
+        case 'debt-bankrupt':
+          engine.giveUpDebt(myPlayerId);
+          break;
         default:
           break;
       }
@@ -447,16 +578,22 @@ export default function BoardGame({
   // ------------------------------------------------------------ derived
 
   const players = state.players;
+  const stepMs = testTiming().step || DEFAULT_TIMING.step;
+  const shownPositions = useWalkingPositions(state.positions, stepMs);
+  const boardRef = useRef(null);
+  const tileRefs = useRef({});
+  const tileCentres = useTileCentres(boardRef, tileRefs);
+
   // A token that wraps from the top row back past Go lights the Go tile up
   // for a moment. Going to Jail also moves a token back, so Jail is skipped.
   useEffect(() => {
     const before = lastPositions.current;
-    lastPositions.current = state.positions;
+    lastPositions.current = shownPositions;
 
     const passed =
       before &&
-      Object.keys(state.positions).some(
-        (id) => before[id] >= 28 && state.positions[id] <= 11 && state.positions[id] !== 10,
+      Object.keys(shownPositions).some(
+        (id) => before[id] >= 28 && shownPositions[id] <= 11 && shownPositions[id] !== 10,
       );
 
     if (passed) {
@@ -464,9 +601,12 @@ export default function BoardGame({
       clearTimeout(goFlashTimer.current);
       goFlashTimer.current = setTimeout(() => setGoFlash(false), 1400);
     }
-  }, [state.positions]);
+  }, [shownPositions]);
 
   useEffect(() => () => clearTimeout(goFlashTimer.current), []);
+
+  // Each new debt starts without the bankruptcy confirm open.
+  useEffect(() => setConfirmBankrupt(false), [state.debt?.endsAt]);
 
   const activePlayer = players[state.activeIndex];
   const me = players.find((player) => player.id === myPlayerId);
@@ -520,7 +660,6 @@ export default function BoardGame({
   const localTime = (at) => (at ? at + (isHost ? 0 : clockOffset) : 0);
   const auctionLeft = useCountdown(localTime(state.auction?.endsAt));
   const actionLeft = useCountdown(localTime(state.turnPhase === 'actions' ? state.actionEndsAt : 0));
-  const noticeLeft = useCountdown(localTime(state.notice?.endsAt || state.drawnCard?.endsAt));
   const log = state.log || [];
   const myCode = me?.code;
   const canDevelopNow =
@@ -624,9 +763,12 @@ export default function BoardGame({
             </span>
           </header>
 
-          <div className="auction-timer" aria-hidden="true">
-            <span style={{ transform: `scaleX(${Math.min(1, auctionLeft / 12000)})` }} />
-          </div>
+          <RadialDial
+            key={auction.endsAt}
+            className="pop-dial"
+            endsAt={localTime(auction.endsAt)}
+            length={Math.max(1, localTime(auction.endsAt) - Date.now())}
+          />
 
           <div className="property-card-body">
             <div className="auction-lead">
@@ -981,9 +1123,7 @@ export default function BoardGame({
           <span className="drawn-card-holder">
             {notice.playerId === myPlayerId ? 'Your balance' : `${payer?.name}'s balance`} updates when this closes
           </span>
-          <span className="hold-timer" aria-hidden="true">
-            <span style={{ transform: `scaleX(${notice.length ? Math.min(1, noticeLeft / notice.length) : 0})` }} />
-          </span>
+          <RadialDial key={notice.id} className="pop-dial" endsAt={localTime(notice.endsAt)} length={notice.length} />
           {canClose && (
             <button type="button" className="text-link hold-close" onClick={() => act({ type: 'dismiss' })}>
               {gain ? 'Collect now' : 'Pay now'}
@@ -1008,9 +1148,7 @@ export default function BoardGame({
           <div className="drawn-card-rule" />
           <p className="drawn-card-text">{card.text}</p>
           <span className="drawn-card-holder">Drawn by {card.playerId === myPlayerId ? 'you' : card.playerName}</span>
-          <span className="hold-timer" aria-hidden="true">
-            <span style={{ transform: `scaleX(${card.length ? Math.min(1, noticeLeft / card.length) : 0})` }} />
-          </span>
+          <RadialDial key={card.endsAt} className="pop-dial" endsAt={localTime(card.endsAt)} length={card.length} />
           {card.playerId === myPlayerId && isMyTurn && (
             <button type="button" className="text-link hold-close" onClick={() => act({ type: 'dismiss' })}>
               Got it
@@ -1275,8 +1413,133 @@ export default function BoardGame({
     );
   };
 
+  // A payment bigger than this player's cash: they choose which buildings to
+  // sell and which properties to mortgage, in any order, before the clock
+  // runs out and the rest is sold for them.
+  const renderDebt = () => {
+    const debt = state.debt;
+
+    if (!debt || debt.playerId !== myPlayerId || state.gameOver) {
+      return null;
+    }
+
+    const balance = state.balances[myPlayerId];
+    const short = Math.max(0, debt.amount - balance);
+    const creditor = players.find((player) => player.id === debt.creditorId);
+    const mine = Object.keys(state.deeds)
+      .map(Number)
+      .filter((id) => state.deeds[id].owner === myPlayerId)
+      .sort((a, b) => a - b);
+    const hasBuildings = (id) => state.deeds[id].houses > 0 || state.deeds[id].hotel;
+    const built = mine.filter(hasBuildings);
+    const plain = mine.filter((id) => !hasBuildings(id) && !state.deeds[id].mortgaged);
+    const sell = (id) => act({ type: 'manage', spaceId: id, action: 'sell' });
+    const mortgage = (id) => act({ type: 'manage', spaceId: id, action: 'mortgage' });
+
+    return (
+      <div className="property-card-overlay end-overlay">
+        <div className="property-card debt-sheet" role="dialog" aria-labelledby="debt-title">
+          <RadialDial key={debt.endsAt} className="pop-dial" endsAt={localTime(debt.endsAt)} length={debt.length} />
+          <header className="property-card-header">
+            <p className="property-card-kicker">Raise funds</p>
+            <h3 id="debt-title">
+              {formatRupees(debt.amount)} for {debt.reason}
+              {creditor ? ` to ${creditor.name}` : ''}
+            </h3>
+          </header>
+
+          <div className="property-card-body">
+            <div className="debt-progress">
+              <span>
+                Cash <strong>{formatRupees(balance)}</strong>
+              </span>
+              <span className={short ? 'amount-negative' : 'amount-positive'}>
+                {short ? `${formatRupees(short)} still to raise` : 'Covered'}
+              </span>
+            </div>
+            <p className="debt-help">
+              Choose what goes first, sell houses and hotels for half their cost or mortgage any property for half its
+              price, the payment goes through as soon as your cash covers it
+            </p>
+
+            {built.length > 0 && (
+              <section className="debt-group">
+                <h4>Buildings</h4>
+                <ul>
+                  {built.map((id) => {
+                    const deed = state.deeds[id];
+                    const canSell = Estate.canSellBuilding(state.deeds, id, BOARD_SPACES);
+                    const refund = Estate.propertyDetails[id].houseCost / 2;
+                    return (
+                      <li key={id} style={{ '--family': `var(--color-${BOARD_SPACES[id].colorGroup})` }}>
+                        <span className="debt-name">
+                          <strong>{BOARD_SPACES[id].name}</strong>
+                          <em>{deed.hotel ? 'Hotel' : `${deed.houses} house${deed.houses > 1 ? 's' : ''}`}</em>
+                        </span>
+                        <button type="button" className="debt-action" disabled={!canSell} onClick={() => sell(id)}>
+                          {canSell
+                            ? `Sell ${deed.hotel ? 'the hotel' : 'a house'} ${formatRupees(refund)}`
+                            : 'Sell evenly, fullest first'}
+                        </button>
+                      </li>
+                    );
+                  })}
+                </ul>
+              </section>
+            )}
+
+            {plain.length > 0 && (
+              <section className="debt-group">
+                <h4>Properties</h4>
+                <ul>
+                  {plain.map((id) => {
+                    const canMortgage = Estate.canMortgage(state.deeds, id, BOARD_SPACES);
+                    const family = BOARD_SPACES[id].colorGroup;
+                    return (
+                      <li key={id} style={family ? { '--family': `var(--color-${family})` } : undefined}>
+                        <span className="debt-name">
+                          <strong>{BOARD_SPACES[id].name}</strong>
+                        </span>
+                        <button type="button" className="debt-action" disabled={!canMortgage} onClick={() => mortgage(id)}>
+                          {canMortgage
+                            ? `Mortgage ${formatRupees(Estate.mortgageValue(id, BOARD_SPACES))}`
+                            : "Sell this family's buildings first"}
+                        </button>
+                      </li>
+                    );
+                  })}
+                </ul>
+              </section>
+            )}
+
+            <div className="debt-footer">
+              {confirmBankrupt ? (
+                <>
+                  <span>Everything you own goes to {creditor ? creditor.name : 'the bank'}</span>
+                  <button type="button" className="debt-bankrupt" onClick={() => act({ type: 'debt-bankrupt' })}>
+                    Yes, declare bankruptcy
+                  </button>
+                  <button type="button" className="text-link" onClick={() => setConfirmBankrupt(false)}>
+                    Keep playing
+                  </button>
+                </>
+              ) : (
+                <>
+                  <span>When the time runs out, the rest is sold for you</span>
+                  <button type="button" className="debt-bankrupt" onClick={() => setConfirmBankrupt(true)}>
+                    Declare bankruptcy
+                  </button>
+                </>
+              )}
+            </div>
+          </div>
+        </div>
+      </div>
+    );
+  };
+
   const renderIncomingTrade = () => {
-    if (!incoming || tradeDraft || state.gameOver) {
+    if (!incoming || tradeDraft || state.gameOver || state.debt?.playerId === myPlayerId) {
       return null;
     }
 
@@ -1588,12 +1851,9 @@ export default function BoardGame({
         </aside>
 
         <section className="game-board-area" aria-label="Manapally game board">
-          <div className="game-board">
+          <div className="game-board" ref={boardRef}>
             {BOARD_SPACES.map((space) => {
               const [column, row] = BOARD_GRID[space.id];
-              const tokens = players.filter(
-                (player) => state.positions[player.id] === space.id && !state.bankrupt[player.id],
-              );
               const isClickable = ['property', 'route', 'utility'].includes(space.type);
               const deed = state.deeds[space.id];
               const owner = deed ? ownerOf(space.id) : null;
@@ -1606,6 +1866,9 @@ export default function BoardGame({
                     goFlash && space.id === 0 ? 'board-space--go-flash' : ''
                   }`}
                   key={space.id}
+                  ref={(tile) => {
+                    tileRefs.current[space.id] = tile;
+                  }}
                   style={{ gridColumn: column, gridRow: row }}
                   onClick={() => isClickable && setSelectedProperty(space.id)}
                   onKeyDown={(event) => {
@@ -1665,25 +1928,49 @@ export default function BoardGame({
                     space.price && <span className="space-cost">{formatCurrency(space.price)}</span>
                   )}
 
-                  {tokens.length > 0 && (
-                    <div className="space-tokens">
-                      {tokens.map((player) => (
-                        <span
-                          className={`board-token seat-${player.pieceKey} ${
-                            player.id === activePlayer?.id && state.turnPhase === 'pre-roll' && !state.busy && !state.gameOver
-                              ? 'board-token--waiting'
-                              : ''
-                          }`}
-                          key={player.id}
-                        >
-                          <PieceMark piece={player.pieceKey} variant="token" title={player.name} />
-                        </span>
-                      ))}
-                    </div>
-                  )}
                 </article>
               );
             })}
+
+            {/* Tokens ride above the tiles and glide from one to the next */}
+            <div className="token-layer" aria-hidden="true">
+              {players.map((player) => {
+                if (state.bankrupt[player.id]) return null;
+                const position = shownPositions[player.id];
+                const centre = tileCentres[position];
+                if (!centre) return null;
+
+                const sharing = players.filter(
+                  (other) => !state.bankrupt[other.id] && shownPositions[other.id] === position,
+                );
+                const index = sharing.indexOf(player);
+                const spread = Math.min(centre.w * 0.28, 14);
+                const dx = (index - (sharing.length - 1) / 2) * spread;
+                const waiting =
+                  player.id === activePlayer?.id && state.turnPhase === 'pre-roll' && !state.busy && !state.gameOver;
+
+                return (
+                  <span
+                    className="token-slot"
+                    key={player.id}
+                    style={{
+                      transform: `translate(${centre.x + dx}px, ${centre.y}px)`,
+                      transitionDuration: `${Math.round(stepMs * 0.85)}ms`,
+                      '--step': `${Math.round(stepMs * 0.85)}ms`,
+                      zIndex: 2 + index,
+                    }}
+                  >
+                    <span
+                      key={position}
+                      className={`board-token seat-${player.pieceKey} ${waiting ? 'board-token--waiting' : ''}`}
+                      title={player.name}
+                    >
+                      <PieceMark piece={player.pieceKey} variant="token" title={player.name} />
+                    </span>
+                  </span>
+                );
+              })}
+            </div>
 
             <div className="board-direction-indicator" aria-label="Movement direction is clockwise">
               <svg viewBox="0 0 100 100" className="direction-arrow">
@@ -1718,6 +2005,7 @@ export default function BoardGame({
           {renderCardViewer()}
           {renderTradeComposer()}
           {renderIncomingTrade()}
+          {renderDebt()}
           {renderResults()}
 
           {sheet === 'dice' && (
@@ -1972,6 +2260,15 @@ export default function BoardGame({
               {state.dice ? `Total ${state.dice[0] + state.dice[1]}` : state.rolling ? 'Rolling' : 'Ready to roll'}
             </span>
           </div>
+
+          {state.debt && state.debt.playerId !== myPlayerId && !state.gameOver && (
+            <p className="debt-banner" role="status">
+              <RadialDial key={state.debt.endsAt} endsAt={localTime(state.debt.endsAt)} length={state.debt.length} />
+              {players.find((player) => player.id === state.debt.playerId)?.name} is raising{' '}
+              {formatRupees(Math.max(0, state.debt.amount - (state.balances[state.debt.playerId] || 0)))} for{' '}
+              {state.debt.reason}
+            </p>
+          )}
 
           {state.turnPhase === 'actions' && !state.gameOver && (
             <div className={`action-window ${actionSeconds <= 3 ? 'action-window--urgent' : ''}`} aria-live="polite">

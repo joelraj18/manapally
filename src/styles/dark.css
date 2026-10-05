@@ -75,10 +75,9 @@
   box-shadow: 0 0 14px rgba(57, 255, 136, 0.4);
 }
 
-[data-theme='dark'] .hold-timer > span,
-[data-theme='dark'] .auction-timer span {
-  background: linear-gradient(90deg, #1f9d55, var(--neon));
-  box-shadow: 0 0 10px rgba(57, 255, 136, 0.5);
+[data-theme='dark'] .radial-dial-arc {
+  stroke: var(--neon);
+  filter: drop-shadow(0 0 4px rgba(57, 255, 136, 0.7));
 }
 
 /* Fixed light tints become deep versions of the same hue */
@@ -317,10 +316,10 @@
   filter: drop-shadow(0 0 4px currentColor);
 }
 
-[data-theme='dark'] .board-token--waiting {
+[data-theme='dark'] .token-slot .board-token--waiting {
   animation:
-    tokenHop 0.34s cubic-bezier(0.3, 0.7, 0.4, 1),
-    neonWait 1.8s 0.34s ease-in-out infinite;
+    tokenStep var(--step, 0.5s) cubic-bezier(0.45, 0, 0.25, 1),
+    neonWait 1.8s var(--step, 0.5s) ease-in-out infinite;
 }
 
 @keyframes neonWait {
@@ -384,6 +383,12 @@
   fill: #e9f5ec;
 }
 
+/* The pips stay dark on the light die face, the sage scale turns light here */
+[data-theme='dark'] .die-face circle,
+[data-theme='dark'] .hero-die circle {
+  fill: #0c1f14;
+}
+
 [data-theme='dark'] .dice-display--rolling .die-face {
   filter: drop-shadow(0 0 12px rgba(57, 255, 136, 0.55));
 }
@@ -408,7 +413,7 @@
 
 @media (prefers-reduced-motion: reduce) {
   [data-theme='dark'] .board-centre-art h1,
-  [data-theme='dark'] .board-token--waiting,
+  [data-theme='dark'] .token-slot .board-token--waiting,
   [data-theme='dark'] .game-player--active {
     animation: none;
   }
