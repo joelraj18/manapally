@@ -1976,6 +1976,57 @@
   }
 }
 
+/* Tablets: the actions take the room they need and the turn sits between */
+.board-topbar .lobby-back {
+  white-space: nowrap;
+}
+
+@media (max-width: 1000px) {
+  .board-topbar {
+    grid-template-columns: auto minmax(0, 1fr) auto;
+    gap: 12px;
+  }
+
+  .board-topbar .round-indicator {
+    justify-self: center;
+    white-space: nowrap;
+  }
+}
+
+@media (max-width: 760px) {
+  .board-topbar .room-code-pill,
+  .board-topbar .brand-logo-word {
+    display: none;
+  }
+}
+
+/* On phones the bar keeps the logo alone so every control stays in view */
+@media (max-width: 480px) {
+  .board-topbar {
+    gap: 8px;
+    padding: 0 12px;
+  }
+
+  .board-topbar-actions {
+    gap: 4px;
+  }
+
+  .board-topbar .topbar-icon-button,
+  .board-topbar .sound-mixer-button,
+  .board-topbar .theme-toggle {
+    width: 32px;
+    height: 32px;
+  }
+
+  .board-topbar .end-game-button {
+    padding: 5px 10px;
+  }
+
+  .board-topbar .lobby-back {
+    margin-left: 4px;
+  }
+}
+
 /* Ending the game by agreement */
 
 .end-game-button {
