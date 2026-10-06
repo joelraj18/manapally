@@ -682,6 +682,18 @@
   color: var(--sage-400);
 }
 
+/* A lede kept to one line wherever the screen is wide enough to read it */
+.section-lede--line {
+  max-width: none;
+  text-wrap: balance;
+}
+
+@media (min-width: 720px) {
+  .section-lede--line {
+    white-space: nowrap;
+  }
+}
+
 .home-section--dark .section-lede {
   color: #a1a59a;
 }

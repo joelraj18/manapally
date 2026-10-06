@@ -28,8 +28,13 @@
   justify-self: start;
 }
 
-.waiting-topbar .lobby-back {
+.waiting-topbar .topbar-right {
   justify-self: end;
+  gap: 12px;
+}
+
+.waiting-topbar .lobby-back {
+  white-space: nowrap;
 }
 
 .room-status {
@@ -39,6 +44,7 @@
   color: var(--ink-secondary);
   font-size: 0.82rem;
   font-weight: 500;
+  white-space: nowrap;
 }
 
 .waiting-room-layout {
@@ -431,6 +437,18 @@
     justify-items: center;
   }
 
+  .route-status {
+    justify-content: center;
+    margin-right: auto;
+    margin-left: auto;
+  }
+
+  .route-note,
+  .offline-note {
+    margin-right: auto;
+    margin-left: auto;
+  }
+
   .waiting-room-panel {
     width: min(620px, 100%);
     margin: 0 auto;
@@ -671,6 +689,7 @@
 }
 
 .premium-ai-head span {
+  display: block;
   color: var(--ink-tertiary);
   font-size: 0.82rem;
   line-height: 1.4;
